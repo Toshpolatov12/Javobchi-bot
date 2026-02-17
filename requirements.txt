@@ -1,5 +1,4 @@
-aiogram
-google-generativeai
-aiohttp
-python-dotenv
-pydantic
+aiogram==3.4.1
+google-generativeai==0.7.2
+aiohttp==3.9.3
+python-dotenv==1.0.0

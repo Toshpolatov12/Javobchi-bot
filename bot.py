@@ -26,11 +26,18 @@ async def get_ai_response(text: str) -> str:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 data = await resp.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"]
+                logging.info(f"Gemini javob: {data}")
+                if "candidates" in data:
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                elif "error" in data:
+                    logging.error(f"Gemini error: {data['error']}")
+                    return "❌ Xatolik yuz berdi. Iltimos qayta urinib ko'ring."
+                else:
+                    logging.error(f"Kutilmagan javob: {data}")
+                    return "❌ Xatolik yuz berdi. Iltimos qayta urinib ko'ring."
     except Exception as e:
         logging.error(f"Gemini xatosi: {e}")
         return "❌ Xatolik yuz berdi. Iltimos qayta urinib ko'ring."
-
 async def generate_image(prompt: str) -> bytes | None:
     try:
         encoded = urllib.parse.quote(prompt)

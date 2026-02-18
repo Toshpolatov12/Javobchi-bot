@@ -11,62 +11,47 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-# === KALITLAR ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# === LOGGING ===
 logging.basicConfig(level=logging.INFO)
 
-# === BOT VA DISPATCHER ===
 storage = MemoryStorage()
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=storage)
 
-# === STATE ===
 class UserState(StatesGroup):
     choosing_language = State()
     main_menu = State()
     qr_waiting = State()
 
-# === MATNLAR ===
 TEXTS = {
     "uz": {
-        "language_selected": "✅ Til tanlandi: O'zbek\n\n🤖 Men AI yordamchiman!\nIstalgan savol yozing, javob beraman.",
+        "welcome": "✅ Til tanlandi: O'zbek\n\n🤖 Men AI yordamchiman!\nIstalgan savol yozing, javob beraman.",
         "thinking": "🤔 O'ylamoqda...",
-        "back": "🔙 Ortga",
-        "menu_btn": "📋 Menyu",
-        "qr_btn": "📷 QR Kod yaratish",
-        "qr_prompt": "📝 QR kodga aylantirilishi kerak bo'lgan matn yoki link yuboring:",
+        "qr_btn": "📷 QR Kod",
+        "qr_prompt": "📝 QR kodga aylantirilishi kerak bo'lgan matn yoki link yuboring:\n\n(Orqaga qaytish uchun /start bosing)",
         "qr_success": "✅ QR kod tayyor!",
         "qr_error": "❌ QR kod yaratishda xatolik.",
-        "back_main": "🏠 Asosiy menu",
     },
     "ru": {
-        "language_selected": "✅ Язык выбран: Русский\n\n🤖 Я AI помощник!\nЗадайте любой вопрос, я отвечу.",
+        "welcome": "✅ Язык выбран: Русский\n\n🤖 Я AI помощник!\nЗадайте любой вопрос, я отвечу.",
         "thinking": "🤔 Думаю...",
-        "back": "🔙 Назад",
-        "menu_btn": "📋 Меню",
-        "qr_btn": "📷 Создать QR код",
-        "qr_prompt": "📝 Отправьте текст или ссылку для QR кода:",
+        "qr_btn": "📷 QR Код",
+        "qr_prompt": "📝 Отправьте текст или ссылку для QR кода:\n\n(Для возврата нажмите /start)",
         "qr_success": "✅ QR код готов!",
         "qr_error": "❌ Ошибка при создании QR кода.",
-        "back_main": "🏠 Главное меню",
     },
     "en": {
-        "language_selected": "✅ Language: English\n\n🤖 I'm an AI assistant!\nAsk me anything.",
+        "welcome": "✅ Language: English\n\n🤖 I'm an AI assistant!\nAsk me anything.",
         "thinking": "🤔 Thinking...",
-        "back": "🔙 Back",
-        "menu_btn": "📋 Menu",
-        "qr_btn": "📷 Create QR Code",
-        "qr_prompt": "📝 Send text or link to generate QR code:",
+        "qr_btn": "📷 QR Code",
+        "qr_prompt": "📝 Send text or link to generate QR code:\n\n(Press /start to go back)",
         "qr_success": "✅ QR code ready!",
         "qr_error": "❌ Error creating QR code.",
-        "back_main": "🏠 Main menu",
     }
 }
 
-# === KLAVIATURALAR ===
 def get_language_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -78,23 +63,10 @@ def get_language_keyboard():
 
 def get_main_keyboard(lang):
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=TEXTS[lang]["menu_btn"])]
-        ],
+        keyboard=[[KeyboardButton(text=TEXTS[lang]["qr_btn"])]],
         resize_keyboard=True
     )
 
-def get_menu_inline(lang):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=TEXTS[lang]["qr_btn"], callback_data="qr_code")],
-    ])
-
-def get_back_inline(lang):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=TEXTS[lang]["back_main"], callback_data="back_main")]
-    ])
-
-# === /start ===
 @dp.message(Command("start"))
 async def start_handler(message: Message, state: FSMContext):
     await state.set_state(UserState.choosing_language)
@@ -103,10 +75,9 @@ async def start_handler(message: Message, state: FSMContext):
         reply_markup=get_language_keyboard()
     )
 
-# === TIL TANLASH ===
 @dp.message(UserState.choosing_language)
 async def language_selected(message: Message, state: FSMContext):
-    text = message.text
+    text = message.text or ""
     if "🇺🇿" in text:
         lang = "uz"
     elif "🇷🇺" in text:
@@ -114,45 +85,19 @@ async def language_selected(message: Message, state: FSMContext):
     elif "🇬🇧" in text:
         lang = "en"
     else:
-        await message.answer("Iltimos, tilni tanlang / Пожалуйста, выберите язык / Please choose a language:")
+        await message.answer("Iltimos, tilni tanlang:", reply_markup=get_language_keyboard())
         return
     await state.update_data(language=lang)
     await state.set_state(UserState.main_menu)
-    await message.answer(
-        TEXTS[lang]["language_selected"],
-        reply_markup=get_main_keyboard(lang)
-    )
+    await message.answer(TEXTS[lang]["welcome"], reply_markup=get_main_keyboard(lang))
 
-# === MENYU TUGMASI ===
-@dp.message(F.text.in_(["📋 Menyu", "📋 Меню", "📋 Menu"]))
-async def show_menu(message: Message, state: FSMContext):
-    data = await state.get_data()
-    lang = data.get("language", "uz")
-    await message.answer("📋", reply_markup=get_menu_inline(lang))
-
-# === QR KOD CALLBACK ===
-@dp.callback_query(F.data == "qr_code")
-async def qr_code_start(callback: CallbackQuery, state: FSMContext):
+# === QR KOD TUGMASI ===
+@dp.message(UserState.main_menu, F.text.in_(["📷 QR Kod", "📷 QR Код", "📷 QR Code"]))
+async def qr_start(message: Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get("language", "uz")
     await state.set_state(UserState.qr_waiting)
-    await callback.message.answer(
-        TEXTS[lang]["qr_prompt"],
-        reply_markup=get_back_inline(lang)
-    )
-    await callback.answer()
-
-# === ORTGA CALLBACK ===
-@dp.callback_query(F.data == "back_main")
-async def back_to_main(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    lang = data.get("language", "uz")
-    await state.set_state(UserState.main_menu)
-    await callback.message.answer(
-        TEXTS[lang]["language_selected"],
-        reply_markup=get_main_keyboard(lang)
-    )
-    await callback.answer()
+    await message.answer(TEXTS[lang]["qr_prompt"])
 
 # === QR KOD YARATISH ===
 @dp.message(UserState.qr_waiting)
@@ -178,14 +123,13 @@ async def generate_qr(message: Message, state: FSMContext):
         photo = BufferedInputFile(buf.read(), filename="qrcode.png")
         await message.answer_photo(
             photo,
-            caption=f"{TEXTS[lang]['qr_success']}\n📝 {text[:50]}{'...' if len(text) > 50 else ''}",
-            reply_markup=get_back_inline(lang)
+            caption=f"{TEXTS[lang]['qr_success']}\n📝 {text[:100]}{'...' if len(text) > 100 else ''}"
         )
+        # Yana QR kod kutadi
+        await message.answer(TEXTS[lang]["qr_prompt"])
     except Exception as e:
         logging.error(f"QR xatosi: {e}")
         await message.answer(TEXTS[lang]["qr_error"])
-
-    await state.set_state(UserState.main_menu)
 
 # === AI JAVOB ===
 async def get_ai_response(text: str, lang: str) -> str:
@@ -224,7 +168,6 @@ async def get_ai_response(text: str, lang: str) -> str:
         else:
             return "❌ An error occurred. Please try again."
 
-# === ASOSIY HANDLER ===
 @dp.message(UserState.main_menu)
 async def message_handler(message: Message, state: FSMContext):
     text = message.text or ""
@@ -247,7 +190,6 @@ async def message_handler(message: Message, state: FSMContext):
     else:
         await message.answer(response)
 
-# === ISHGA TUSHIRISH ===
 async def main():
     print("🤖 AI Javobchi bot ishga tushdi!")
     await dp.start_polling(bot, drop_pending_updates=True)

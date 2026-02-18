@@ -7,7 +7,7 @@ import io
 from fpdf import FPDF
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -33,10 +33,12 @@ TEXTS = {
         "thinking": "🤔 O'ylamoqda...",
         "qr_btn": "📷 QR Kod yaratish",
         "pdf_btn": "📄 PDF Generator",
-        "qr_prompt": "📝 QR kodga aylantirilishi kerak bo'lgan matn yoki link yuboring:\n\n(Orqaga qaytish uchun /start bosing)",
+        "qr_prompt": "📝 Quyidagilardan birini yuboring:\n\n• Matn yoki link → QR kodga aylanadi\n• Rasm 🖼 → yuklab, linkini QR qiladi\n• Ovoz/qo'shiq 🎵 → yuklab, linkini QR qiladi\n\n(Orqaga: /start)",
+        "qr_uploading": "⏳ Fayl yuklanmoqda...",
         "qr_success": "✅ QR kod tayyor!",
-        "qr_error": "❌ QR kod yaratishda xatolik.",
-        "pdf_prompt": "📄 Matningizni yuboring, men uni PDF ko'rinishiga keltirib sizga yuboraman!\n\n💡 Quyidagilarni yuborishingiz mumkin:\n• Istalgan matn\n• Maqola yoki hujjat\n• Ro'yxat yoki jadval\n\n(Orqaga qaytish uchun /start bosing)",
+        "qr_file_success": "✅ Fayl yuklandi va QR kod tayyor!\n🔗 Link (1 kun amal qiladi):",
+        "qr_error": "❌ Xatolik yuz berdi.",
+        "pdf_prompt": "📄 Matningizni yuboring, PDF ga aylantirib beraman!\n\n💡 Yuborishingiz mumkin:\n• Istalgan matn\n• Maqola yoki hujjat\n• Ro'yxat\n\n(Orqaga: /start)",
         "pdf_success": "✅ PDF tayyor!",
         "pdf_error": "❌ PDF yaratishda xatolik.",
         "pdf_processing": "⏳ PDF yaratilmoqda...",
@@ -46,10 +48,12 @@ TEXTS = {
         "thinking": "🤔 Думаю...",
         "qr_btn": "📷 Создать QR код",
         "pdf_btn": "📄 PDF Генератор",
-        "qr_prompt": "📝 Отправьте текст или ссылку для QR кода:\n\n(Для возврата нажмите /start)",
+        "qr_prompt": "📝 Отправьте одно из следующего:\n\n• Текст или ссылку → QR код\n• Изображение 🖼 → загрузит и сделает QR\n• Аудио/музыку 🎵 → загрузит и сделает QR\n\n(Назад: /start)",
+        "qr_uploading": "⏳ Загрузка файла...",
         "qr_success": "✅ QR код готов!",
-        "qr_error": "❌ Ошибка при создании QR кода.",
-        "pdf_prompt": "📄 Отправьте текст, и я преобразую его в PDF!\n\n💡 Вы можете отправить:\n• Любой текст\n• Статью или документ\n• Список или таблицу\n\n(Для возврата нажмите /start)",
+        "qr_file_success": "✅ Файл загружен, QR код готов!\n🔗 Ссылка (действует 1 день):",
+        "qr_error": "❌ Произошла ошибка.",
+        "pdf_prompt": "📄 Отправьте текст, преобразую в PDF!\n\n💡 Можно отправить:\n• Любой текст\n• Статью или документ\n• Список\n\n(Назад: /start)",
         "pdf_success": "✅ PDF готов!",
         "pdf_error": "❌ Ошибка при создании PDF.",
         "pdf_processing": "⏳ Создаю PDF...",
@@ -59,10 +63,12 @@ TEXTS = {
         "thinking": "🤔 Thinking...",
         "qr_btn": "📷 Create QR Code",
         "pdf_btn": "📄 PDF Generator",
-        "qr_prompt": "📝 Send text or link to generate QR code:\n\n(Press /start to go back)",
+        "qr_prompt": "📝 Send one of the following:\n\n• Text or link → QR code\n• Image 🖼 → uploads and makes QR\n• Audio/music 🎵 → uploads and makes QR\n\n(Back: /start)",
+        "qr_uploading": "⏳ Uploading file...",
         "qr_success": "✅ QR code ready!",
-        "qr_error": "❌ Error creating QR code.",
-        "pdf_prompt": "📄 Send me your text and I'll convert it to PDF!\n\n💡 You can send:\n• Any text\n• Article or document\n• List or table\n\n(Press /start to go back)",
+        "qr_file_success": "✅ File uploaded, QR code ready!\n🔗 Link (valid 1 day):",
+        "qr_error": "❌ An error occurred.",
+        "pdf_prompt": "📄 Send text and I'll convert it to PDF!\n\n💡 You can send:\n• Any text\n• Article or document\n• List\n\n(Back: /start)",
         "pdf_success": "✅ PDF ready!",
         "pdf_error": "❌ Error creating PDF.",
         "pdf_processing": "⏳ Creating PDF...",
@@ -85,6 +91,31 @@ def get_main_keyboard(lang):
         ],
         resize_keyboard=True
     )
+
+def make_qr(data: str) -> bytes:
+    qr = qrcode.QRCode(version=1, box_size=10, border=4)
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf.read()
+
+async def upload_to_fileio(file_bytes: bytes, filename: str) -> str | None:
+    try:
+        async with aiohttp.ClientSession() as session:
+            form = aiohttp.FormData()
+            form.add_field("file", file_bytes, filename=filename)
+            form.add_field("expires", "1d")
+            async with session.post("https://file.io", data=form, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("success"):
+                        return data.get("link")
+    except Exception as e:
+        logging.error(f"file.io xatosi: {e}")
+    return None
 
 @dp.message(Command("start"))
 async def start_handler(message: Message, state: FSMContext):
@@ -110,7 +141,6 @@ async def language_selected(message: Message, state: FSMContext):
     await state.set_state(UserState.main_menu)
     await message.answer(TEXTS[lang]["welcome"], reply_markup=get_main_keyboard(lang))
 
-# === QR KOD TUGMASI ===
 @dp.message(UserState.main_menu, F.text.in_(["📷 QR Kod yaratish", "📷 Создать QR код", "📷 Create QR Code"]))
 async def qr_start(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -118,43 +148,88 @@ async def qr_start(message: Message, state: FSMContext):
     await state.set_state(UserState.qr_waiting)
     await message.answer(TEXTS[lang]["qr_prompt"])
 
-# === PDF TUGMASI ===
-@dp.message(UserState.main_menu, F.text.in_(["📄 PDF Generator", "📄 PDF Генератор", "📄 PDF Generator"]))
+@dp.message(UserState.main_menu, F.text.in_(["📄 PDF Generator", "📄 PDF Генератор"]))
 async def pdf_start(message: Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get("language", "uz")
     await state.set_state(UserState.pdf_waiting)
     await message.answer(TEXTS[lang]["pdf_prompt"])
 
-# === QR KOD YARATISH ===
-@dp.message(UserState.qr_waiting)
-async def generate_qr(message: Message, state: FSMContext):
+# === QR KOD - MATN ===
+@dp.message(UserState.qr_waiting, F.text)
+async def qr_from_text(message: Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get("language", "uz")
     text = message.text or ""
-
-    if not text:
-        await message.answer(TEXTS[lang]["qr_prompt"])
-        return
-
     try:
-        qr = qrcode.QRCode(version=1, box_size=10, border=4)
-        qr.add_data(text)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        buf.seek(0)
-
-        photo = BufferedInputFile(buf.read(), filename="qrcode.png")
-        await message.answer_photo(
-            photo,
-            caption=f"{TEXTS[lang]['qr_success']}\n📝 {text[:100]}{'...' if len(text) > 100 else ''}"
-        )
+        qr_bytes = make_qr(text)
+        photo = BufferedInputFile(qr_bytes, filename="qrcode.png")
+        await message.answer_photo(photo, caption=f"{TEXTS[lang]['qr_success']}\n📝 {text[:100]}{'...' if len(text) > 100 else ''}")
         await message.answer(TEXTS[lang]["qr_prompt"])
     except Exception as e:
         logging.error(f"QR xatosi: {e}")
+        await message.answer(TEXTS[lang]["qr_error"])
+
+# === QR KOD - RASM ===
+@dp.message(UserState.qr_waiting, F.photo)
+async def qr_from_photo(message: Message, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    wait_msg = await message.answer(TEXTS[lang]["qr_uploading"])
+    try:
+        file = await bot.get_file(message.photo[-1].file_id)
+        buf = io.BytesIO()
+        await bot.download_file(file.file_path, buf)
+        buf.seek(0)
+        link = await upload_to_fileio(buf.read(), "image.jpg")
+        await wait_msg.delete()
+        if link:
+            qr_bytes = make_qr(link)
+            photo = BufferedInputFile(qr_bytes, filename="qrcode.png")
+            await message.answer_photo(photo, caption=f"{TEXTS[lang]['qr_file_success']}\n{link}")
+        else:
+            await message.answer(TEXTS[lang]["qr_error"])
+        await message.answer(TEXTS[lang]["qr_prompt"])
+    except Exception as e:
+        logging.error(f"Rasm QR xatosi: {e}")
+        try: await wait_msg.delete()
+        except: pass
+        await message.answer(TEXTS[lang]["qr_error"])
+
+# === QR KOD - OVOZ/AUDIO ===
+@dp.message(UserState.qr_waiting, F.audio | F.voice | F.document)
+async def qr_from_audio(message: Message, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    wait_msg = await message.answer(TEXTS[lang]["qr_uploading"])
+    try:
+        if message.audio:
+            file_id = message.audio.file_id
+            filename = message.audio.file_name or "audio.mp3"
+        elif message.voice:
+            file_id = message.voice.file_id
+            filename = "voice.ogg"
+        else:
+            file_id = message.document.file_id
+            filename = message.document.file_name or "file"
+
+        file = await bot.get_file(file_id)
+        buf = io.BytesIO()
+        await bot.download_file(file.file_path, buf)
+        buf.seek(0)
+        link = await upload_to_fileio(buf.read(), filename)
+        await wait_msg.delete()
+        if link:
+            qr_bytes = make_qr(link)
+            photo = BufferedInputFile(qr_bytes, filename="qrcode.png")
+            await message.answer_photo(photo, caption=f"{TEXTS[lang]['qr_file_success']}\n{link}")
+        else:
+            await message.answer(TEXTS[lang]["qr_error"])
+        await message.answer(TEXTS[lang]["qr_prompt"])
+    except Exception as e:
+        logging.error(f"Audio QR xatosi: {e}")
+        try: await wait_msg.delete()
+        except: pass
         await message.answer(TEXTS[lang]["qr_error"])
 
 # === PDF YARATISH ===
@@ -163,19 +238,16 @@ async def generate_pdf(message: Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get("language", "uz")
     text = message.text or ""
-
     if not text:
         await message.answer(TEXTS[lang]["pdf_prompt"])
         return
 
     wait_msg = await message.answer(TEXTS[lang]["pdf_processing"])
-
     try:
         pdf = FPDF()
         pdf.add_page()
         pdf.set_margins(20, 20, 20)
 
-        # Unicode shrift
         font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
         if os.path.exists(font_path):
             pdf.add_font("DejaVu", "", font_path, uni=True)
@@ -183,7 +255,6 @@ async def generate_pdf(message: Message, state: FSMContext):
         else:
             pdf.set_font("Helvetica", size=12)
 
-        # Sarlavha
         pdf.set_font_size(16)
         pdf.cell(0, 10, "Document", ln=True, align="C")
         pdf.ln(5)
@@ -191,7 +262,6 @@ async def generate_pdf(message: Message, state: FSMContext):
         pdf.line(20, pdf.get_y(), 190, pdf.get_y())
         pdf.ln(8)
 
-        # Matn
         for line in text.split("\n"):
             pdf.multi_cell(0, 8, line if line else " ")
 
@@ -203,13 +273,10 @@ async def generate_pdf(message: Message, state: FSMContext):
         doc = BufferedInputFile(buf.read(), filename="document.pdf")
         await message.answer_document(doc, caption=TEXTS[lang]["pdf_success"])
         await message.answer(TEXTS[lang]["pdf_prompt"])
-
     except Exception as e:
         logging.error(f"PDF xatosi: {e}")
-        try:
-            await wait_msg.delete()
-        except:
-            pass
+        try: await wait_msg.delete()
+        except: pass
         await message.answer(TEXTS[lang]["pdf_error"])
 
 # === AI JAVOB ===
@@ -254,17 +321,14 @@ async def message_handler(message: Message, state: FSMContext):
     text = message.text or ""
     if not text:
         return
-
     data = await state.get_data()
     lang = data.get("language", "uz")
-
     wait_msg = await message.answer(TEXTS[lang]["thinking"])
     response = await get_ai_response(text, lang)
     try:
         await wait_msg.delete()
     except:
         pass
-
     if len(response) > 4000:
         for i in range(0, len(response), 4000):
             await message.answer(response[i:i+4000])

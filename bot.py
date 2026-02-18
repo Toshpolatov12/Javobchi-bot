@@ -252,8 +252,21 @@ async def message_handler(message: Message, state: FSMContext):
         
         if image_data:
             from aiogram.types import BufferedInputFile
-            photo = BufferedInputFile(image_data, filename="image.jpg")
-            await message.answer_photo(photo, caption=f"🎨 {prompt}")
+            try:
+                photo = BufferedInputFile(image_data, filename="image.png")
+                await message.answer_photo(photo, caption=f"🎨 {prompt}")
+            except Exception as e:
+                logging.error(f"Rasm yuborishda xato: {e}")
+                # Agar fayl yuklash ishlamasa, URL yuboramiz
+                from aiogram.types import URLInputFile
+                try:
+                    encoded = urllib.parse.quote(prompt)
+                    image_url = f"https://pollinations.ai/p/{encoded}"
+                    photo_url = URLInputFile(image_url, filename="image.png")
+                    await message.answer_photo(photo_url, caption=f"🎨 {prompt}")
+                except Exception as e2:
+                    logging.error(f"URL yuborishda xato: {e2}")
+                    await message.answer(f"🎨 Rasm tayyor!\n{image_url}")
         else:
             await message.answer(TEXTS[lang]["image_error"])
     

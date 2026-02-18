@@ -4,6 +4,7 @@ import aiohttp
 import os
 import qrcode
 import io
+from fpdf import FPDF
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -24,31 +25,47 @@ class UserState(StatesGroup):
     choosing_language = State()
     main_menu = State()
     qr_waiting = State()
+    pdf_waiting = State()
 
 TEXTS = {
     "uz": {
         "welcome": "✅ Til tanlandi: O'zbek\n\n🤖 Men AI yordamchiman!\nIstalgan savol yozing, javob beraman.",
         "thinking": "🤔 O'ylamoqda...",
-        "qr_btn": "📷 QR Kod",
+        "qr_btn": "📷 QR Kod yaratish",
+        "pdf_btn": "📄 PDF Generator",
         "qr_prompt": "📝 QR kodga aylantirilishi kerak bo'lgan matn yoki link yuboring:\n\n(Orqaga qaytish uchun /start bosing)",
         "qr_success": "✅ QR kod tayyor!",
         "qr_error": "❌ QR kod yaratishda xatolik.",
+        "pdf_prompt": "📄 Matningizni yuboring, men uni PDF ko'rinishiga keltirib sizga yuboraman!\n\n💡 Quyidagilarni yuborishingiz mumkin:\n• Istalgan matn\n• Maqola yoki hujjat\n• Ro'yxat yoki jadval\n\n(Orqaga qaytish uchun /start bosing)",
+        "pdf_success": "✅ PDF tayyor!",
+        "pdf_error": "❌ PDF yaratishda xatolik.",
+        "pdf_processing": "⏳ PDF yaratilmoqda...",
     },
     "ru": {
         "welcome": "✅ Язык выбран: Русский\n\n🤖 Я AI помощник!\nЗадайте любой вопрос, я отвечу.",
         "thinking": "🤔 Думаю...",
-        "qr_btn": "📷 QR Код",
+        "qr_btn": "📷 Создать QR код",
+        "pdf_btn": "📄 PDF Генератор",
         "qr_prompt": "📝 Отправьте текст или ссылку для QR кода:\n\n(Для возврата нажмите /start)",
         "qr_success": "✅ QR код готов!",
         "qr_error": "❌ Ошибка при создании QR кода.",
+        "pdf_prompt": "📄 Отправьте текст, и я преобразую его в PDF!\n\n💡 Вы можете отправить:\n• Любой текст\n• Статью или документ\n• Список или таблицу\n\n(Для возврата нажмите /start)",
+        "pdf_success": "✅ PDF готов!",
+        "pdf_error": "❌ Ошибка при создании PDF.",
+        "pdf_processing": "⏳ Создаю PDF...",
     },
     "en": {
         "welcome": "✅ Language: English\n\n🤖 I'm an AI assistant!\nAsk me anything.",
         "thinking": "🤔 Thinking...",
-        "qr_btn": "📷 QR Code",
+        "qr_btn": "📷 Create QR Code",
+        "pdf_btn": "📄 PDF Generator",
         "qr_prompt": "📝 Send text or link to generate QR code:\n\n(Press /start to go back)",
         "qr_success": "✅ QR code ready!",
         "qr_error": "❌ Error creating QR code.",
+        "pdf_prompt": "📄 Send me your text and I'll convert it to PDF!\n\n💡 You can send:\n• Any text\n• Article or document\n• List or table\n\n(Press /start to go back)",
+        "pdf_success": "✅ PDF ready!",
+        "pdf_error": "❌ Error creating PDF.",
+        "pdf_processing": "⏳ Creating PDF...",
     }
 }
 
@@ -63,7 +80,9 @@ def get_language_keyboard():
 
 def get_main_keyboard(lang):
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=TEXTS[lang]["qr_btn"])]],
+        keyboard=[
+            [KeyboardButton(text=TEXTS[lang]["qr_btn"]), KeyboardButton(text=TEXTS[lang]["pdf_btn"])]
+        ],
         resize_keyboard=True
     )
 
@@ -92,12 +111,20 @@ async def language_selected(message: Message, state: FSMContext):
     await message.answer(TEXTS[lang]["welcome"], reply_markup=get_main_keyboard(lang))
 
 # === QR KOD TUGMASI ===
-@dp.message(UserState.main_menu, F.text.in_(["📷 QR Kod", "📷 QR Код", "📷 QR Code"]))
+@dp.message(UserState.main_menu, F.text.in_(["📷 QR Kod yaratish", "📷 Создать QR код", "📷 Create QR Code"]))
 async def qr_start(message: Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get("language", "uz")
     await state.set_state(UserState.qr_waiting)
     await message.answer(TEXTS[lang]["qr_prompt"])
+
+# === PDF TUGMASI ===
+@dp.message(UserState.main_menu, F.text.in_(["📄 PDF Generator", "📄 PDF Генератор", "📄 PDF Generator"]))
+async def pdf_start(message: Message, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    await state.set_state(UserState.pdf_waiting)
+    await message.answer(TEXTS[lang]["pdf_prompt"])
 
 # === QR KOD YARATISH ===
 @dp.message(UserState.qr_waiting)
@@ -125,11 +152,65 @@ async def generate_qr(message: Message, state: FSMContext):
             photo,
             caption=f"{TEXTS[lang]['qr_success']}\n📝 {text[:100]}{'...' if len(text) > 100 else ''}"
         )
-        # Yana QR kod kutadi
         await message.answer(TEXTS[lang]["qr_prompt"])
     except Exception as e:
         logging.error(f"QR xatosi: {e}")
         await message.answer(TEXTS[lang]["qr_error"])
+
+# === PDF YARATISH ===
+@dp.message(UserState.pdf_waiting)
+async def generate_pdf(message: Message, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    text = message.text or ""
+
+    if not text:
+        await message.answer(TEXTS[lang]["pdf_prompt"])
+        return
+
+    wait_msg = await message.answer(TEXTS[lang]["pdf_processing"])
+
+    try:
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_margins(20, 20, 20)
+
+        # Unicode shrift
+        font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        if os.path.exists(font_path):
+            pdf.add_font("DejaVu", "", font_path, uni=True)
+            pdf.set_font("DejaVu", size=12)
+        else:
+            pdf.set_font("Helvetica", size=12)
+
+        # Sarlavha
+        pdf.set_font_size(16)
+        pdf.cell(0, 10, "Document", ln=True, align="C")
+        pdf.ln(5)
+        pdf.set_font_size(12)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.ln(8)
+
+        # Matn
+        for line in text.split("\n"):
+            pdf.multi_cell(0, 8, line if line else " ")
+
+        buf = io.BytesIO()
+        pdf.output(buf)
+        buf.seek(0)
+
+        await wait_msg.delete()
+        doc = BufferedInputFile(buf.read(), filename="document.pdf")
+        await message.answer_document(doc, caption=TEXTS[lang]["pdf_success"])
+        await message.answer(TEXTS[lang]["pdf_prompt"])
+
+    except Exception as e:
+        logging.error(f"PDF xatosi: {e}")
+        try:
+            await wait_msg.delete()
+        except:
+            pass
+        await message.answer(TEXTS[lang]["pdf_error"])
 
 # === AI JAVOB ===
 async def get_ai_response(text: str, lang: str) -> str:

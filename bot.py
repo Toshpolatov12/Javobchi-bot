@@ -2,10 +2,11 @@ import logging
 import asyncio
 import aiohttp
 import os
-import urllib.parse
+import qrcode
+import io
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -13,7 +14,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 # === KALITLAR ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-HF_API_KEY = os.environ.get("HF_API_KEY")
 
 # === LOGGING ===
 logging.basicConfig(level=logging.INFO)
@@ -27,32 +27,46 @@ dp = Dispatcher(storage=storage)
 class UserState(StatesGroup):
     choosing_language = State()
     main_menu = State()
+    qr_waiting = State()
 
 # === MATNLAR ===
 TEXTS = {
     "uz": {
-        "language_selected": "✅ Til tanlandi: O'zbek\n\n🤖 Men AI yordamchiman!\n\n📝 Qanday ishlatish:\n• Savol yozing — javob beraman\n• 'Rasm:' dan keyin tavsif yozing — rasm yarataman\n\n💡 Misol:\n• Python nima?\n• Rasm: toglar va kok osmon",
+        "language_selected": "✅ Til tanlandi: O'zbek\n\n🤖 Men AI yordamchiman!\nIstalgan savol yozing, javob beraman.",
         "thinking": "🤔 O'ylamoqda...",
-        "generating_image": "🎨 Rasm yaratilmoqda... Biroz kuting",
-        "image_error": "❌ Rasm yaratishda xatolik. Qayta urinib koring.",
         "back": "🔙 Ortga",
+        "menu_btn": "📋 Menyu",
+        "qr_btn": "📷 QR Kod yaratish",
+        "qr_prompt": "📝 QR kodga aylantirilishi kerak bo'lgan matn yoki link yuboring:",
+        "qr_success": "✅ QR kod tayyor!",
+        "qr_error": "❌ QR kod yaratishda xatolik.",
+        "back_main": "🏠 Asosiy menu",
     },
     "ru": {
-        "language_selected": "✅ Язык выбран: Русский\n\n🤖 Я AI помощник!\n\n📝 Как использовать:\n• Напишите вопрос — отвечу\n• Напишите 'Изображение:' и описание — создам картинку\n\n💡 Пример:\n• Что такое Python?\n• Изображение: горы и голубое небо",
+        "language_selected": "✅ Язык выбран: Русский\n\n🤖 Я AI помощник!\nЗадайте любой вопрос, я отвечу.",
         "thinking": "🤔 Думаю...",
-        "generating_image": "🎨 Создаю изображение... Подождите",
-        "image_error": "❌ Ошибка при создании изображения. Попробуйте снова.",
         "back": "🔙 Назад",
+        "menu_btn": "📋 Меню",
+        "qr_btn": "📷 Создать QR код",
+        "qr_prompt": "📝 Отправьте текст или ссылку для QR кода:",
+        "qr_success": "✅ QR код готов!",
+        "qr_error": "❌ Ошибка при создании QR кода.",
+        "back_main": "🏠 Главное меню",
     },
     "en": {
-        "language_selected": "✅ Language selected: English\n\n🤖 I'm an AI assistant!\n\n📝 How to use:\n• Ask a question — I'll answer\n• Type 'Image:' followed by description — I'll generate it\n\n💡 Example:\n• What is Python?\n• Image: mountains and blue sky",
+        "language_selected": "✅ Language: English\n\n🤖 I'm an AI assistant!\nAsk me anything.",
         "thinking": "🤔 Thinking...",
-        "generating_image": "🎨 Generating image... Please wait",
-        "image_error": "❌ Error generating image. Please try again.",
         "back": "🔙 Back",
+        "menu_btn": "📋 Menu",
+        "qr_btn": "📷 Create QR Code",
+        "qr_prompt": "📝 Send text or link to generate QR code:",
+        "qr_success": "✅ QR code ready!",
+        "qr_error": "❌ Error creating QR code.",
+        "back_main": "🏠 Main menu",
     }
 }
 
+# === KLAVIATURALAR ===
 def get_language_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -62,12 +76,25 @@ def get_language_keyboard():
         resize_keyboard=True
     )
 
-def get_back_keyboard(lang):
+def get_main_keyboard(lang):
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=TEXTS[lang]["back"])]],
+        keyboard=[
+            [KeyboardButton(text=TEXTS[lang]["menu_btn"])]
+        ],
         resize_keyboard=True
     )
 
+def get_menu_inline(lang):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=TEXTS[lang]["qr_btn"], callback_data="qr_code")],
+    ])
+
+def get_back_inline(lang):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=TEXTS[lang]["back_main"], callback_data="back_main")]
+    ])
+
+# === /start ===
 @dp.message(Command("start"))
 async def start_handler(message: Message, state: FSMContext):
     await state.set_state(UserState.choosing_language)
@@ -76,6 +103,7 @@ async def start_handler(message: Message, state: FSMContext):
         reply_markup=get_language_keyboard()
     )
 
+# === TIL TANLASH ===
 @dp.message(UserState.choosing_language)
 async def language_selected(message: Message, state: FSMContext):
     text = message.text
@@ -90,65 +118,76 @@ async def language_selected(message: Message, state: FSMContext):
         return
     await state.update_data(language=lang)
     await state.set_state(UserState.main_menu)
-    await message.answer(TEXTS[lang]["language_selected"], reply_markup=get_back_keyboard(lang))
-
-@dp.message(F.text.in_(["🔙 Ortga", "🔙 Назад", "🔙 Back"]))
-async def back_to_language(message: Message, state: FSMContext):
-    await state.set_state(UserState.choosing_language)
     await message.answer(
-        "🌐 Tilni tanlang / Выберите язык / Choose language:",
-        reply_markup=get_language_keyboard()
+        TEXTS[lang]["language_selected"],
+        reply_markup=get_main_keyboard(lang)
     )
 
-async def translate_to_english(prompt: str, lang: str) -> str:
-    if lang == "en":
-        return prompt
+# === MENYU TUGMASI ===
+@dp.message(F.text.in_(["📋 Menyu", "📋 Меню", "📋 Menu"]))
+async def show_menu(message: Message, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    await message.answer("📋", reply_markup=get_menu_inline(lang))
+
+# === QR KOD CALLBACK ===
+@dp.callback_query(F.data == "qr_code")
+async def qr_code_start(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    await state.set_state(UserState.qr_waiting)
+    await callback.message.answer(
+        TEXTS[lang]["qr_prompt"],
+        reply_markup=get_back_inline(lang)
+    )
+    await callback.answer()
+
+# === ORTGA CALLBACK ===
+@dp.callback_query(F.data == "back_main")
+async def back_to_main(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    await state.set_state(UserState.main_menu)
+    await callback.message.answer(
+        TEXTS[lang]["language_selected"],
+        reply_markup=get_main_keyboard(lang)
+    )
+    await callback.answer()
+
+# === QR KOD YARATISH ===
+@dp.message(UserState.qr_waiting)
+async def generate_qr(message: Message, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    text = message.text or ""
+
+    if not text:
+        await message.answer(TEXTS[lang]["qr_prompt"])
+        return
+
     try:
-        url = "https://api.groq.com/openai/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-        payload = {
-            "model": "llama-3.3-70b-versatile",
-            "messages": [
-                {"role": "system", "content": "Translate the following text to English for image generation. Return ONLY the translated text, nothing else."},
-                {"role": "user", "content": prompt}
-            ],
-            "max_tokens": 200
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data["choices"][0]["message"]["content"].strip()
+        qr = qrcode.QRCode(version=1, box_size=10, border=4)
+        qr.add_data(text)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+
+        photo = BufferedInputFile(buf.read(), filename="qrcode.png")
+        await message.answer_photo(
+            photo,
+            caption=f"{TEXTS[lang]['qr_success']}\n📝 {text[:50]}{'...' if len(text) > 50 else ''}",
+            reply_markup=get_back_inline(lang)
+        )
     except Exception as e:
-        logging.error(f"Tarjima xatosi: {e}")
-    return prompt
+        logging.error(f"QR xatosi: {e}")
+        await message.answer(TEXTS[lang]["qr_error"])
 
-async def generate_image(prompt: str) -> bytes | None:
-    # Hugging Face - SDXL
-    try:
-        API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
-        headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-        payload = {"inputs": prompt}
-        logging.info(f"HF ga rasm so'rovi: {prompt}")
+    await state.set_state(UserState.main_menu)
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(API_URL, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=120)) as response:
-                logging.info(f"HF status: {response.status}, content-type: {response.headers.get('content-type', '')}")
-                if response.status == 200:
-                    data = await response.read()
-                    if len(data) > 5000:
-                        logging.info(f"HF muvaffaqiyatli! {len(data)} bytes")
-                        return data
-                    else:
-                        text = await response.text() if len(data) < 1000 else "binary data"
-                        logging.error(f"HF kichik javob: {len(data)} bytes")
-                else:
-                    error = await response.text()
-                    logging.error(f"HF xatosi {response.status}: {error}")
-    except Exception as e:
-        logging.error(f"HF exception: {e}")
-    return None
-
+# === AI JAVOB ===
 async def get_ai_response(text: str, lang: str) -> str:
     try:
         if lang == "uz":
@@ -185,65 +224,33 @@ async def get_ai_response(text: str, lang: str) -> str:
         else:
             return "❌ An error occurred. Please try again."
 
+# === ASOSIY HANDLER ===
 @dp.message(UserState.main_menu)
 async def message_handler(message: Message, state: FSMContext):
     text = message.text or ""
+    if not text:
+        return
+
     data = await state.get_data()
     lang = data.get("language", "uz")
 
-    image_keywords = {
-        "uz": ["rasm:"],
-        "ru": ["изображение:", "картинка:"],
-        "en": ["image:", "picture:"]
-    }
+    wait_msg = await message.answer(TEXTS[lang]["thinking"])
+    response = await get_ai_response(text, lang)
+    try:
+        await wait_msg.delete()
+    except:
+        pass
 
-    is_image_request = any(text.lower().startswith(kw) for kw in image_keywords[lang])
-
-    if is_image_request:
-        prompt = text.split(":", 1)[1].strip() if ":" in text else ""
-        if not prompt:
-            await message.answer("📝 Rasm tavsifini yozing!" if lang == "uz" else "📝 Напишите описание!" if lang == "ru" else "📝 Write description!")
-            return
-
-        wait_msg = await message.answer(TEXTS[lang]["generating_image"])
-        prompt_en = await translate_to_english(prompt, lang)
-        logging.info(f"Prompt tarjima: '{prompt}' -> '{prompt_en}'")
-
-        image_data = await generate_image(prompt_en)
-
-        try:
-            await wait_msg.delete()
-        except:
-            pass
-
-        if image_data:
-            try:
-                photo = BufferedInputFile(image_data, filename="image.png")
-                await message.answer_photo(photo, caption=f"🎨 {prompt}")
-            except Exception as e:
-                logging.error(f"Yuborishda xato: {e}")
-                await message.answer(TEXTS[lang]["image_error"])
-        else:
-            await message.answer(TEXTS[lang]["image_error"])
-
+    if len(response) > 4000:
+        for i in range(0, len(response), 4000):
+            await message.answer(response[i:i+4000])
     else:
-        if not text:
-            return
-        wait_msg = await message.answer(TEXTS[lang]["thinking"])
-        response = await get_ai_response(text, lang)
-        try:
-            await wait_msg.delete()
-        except:
-            pass
-        if len(response) > 4000:
-            for i in range(0, len(response), 4000):
-                await message.answer(response[i:i+4000])
-        else:
-            await message.answer(response)
+        await message.answer(response)
 
+# === ISHGA TUSHIRISH ===
 async def main():
     print("🤖 AI Javobchi bot ishga tushdi!")
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, drop_pending_updates=True)
 
 if __name__ == "__main__":
     asyncio.run(main())

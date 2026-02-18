@@ -5,7 +5,7 @@ import os
 import urllib.parse
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, URLInputFile
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -13,6 +13,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 # === KALITLAR ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+HF_API_KEY = os.environ.get("HF_API_KEY")
 
 # === LOGGING ===
 logging.basicConfig(level=logging.INFO)
@@ -52,7 +53,6 @@ TEXTS = {
     }
 }
 
-# === KLAVIATURA ===
 def get_language_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -68,7 +68,6 @@ def get_back_keyboard(lang):
         resize_keyboard=True
     )
 
-# === /start ===
 @dp.message(Command("start"))
 async def start_handler(message: Message, state: FSMContext):
     await state.set_state(UserState.choosing_language)
@@ -77,7 +76,6 @@ async def start_handler(message: Message, state: FSMContext):
         reply_markup=get_language_keyboard()
     )
 
-# === TIL TANLASH ===
 @dp.message(UserState.choosing_language)
 async def language_selected(message: Message, state: FSMContext):
     text = message.text
@@ -94,7 +92,6 @@ async def language_selected(message: Message, state: FSMContext):
     await state.set_state(UserState.main_menu)
     await message.answer(TEXTS[lang]["language_selected"], reply_markup=get_back_keyboard(lang))
 
-# === ORTGA ===
 @dp.message(F.text.in_(["🔙 Ortga", "🔙 Назад", "🔙 Back"]))
 async def back_to_language(message: Message, state: FSMContext):
     await state.set_state(UserState.choosing_language)
@@ -103,7 +100,6 @@ async def back_to_language(message: Message, state: FSMContext):
         reply_markup=get_language_keyboard()
     )
 
-# === TARJIMA ===
 async def translate_to_english(prompt: str, lang: str) -> str:
     if lang == "en":
         return prompt
@@ -127,13 +123,32 @@ async def translate_to_english(prompt: str, lang: str) -> str:
         logging.error(f"Tarjima xatosi: {e}")
     return prompt
 
-# === RASM URL YARATISH ===
-def generate_image_url(prompt: str) -> str:
-    encoded = urllib.parse.quote(prompt)
-    seed = abs(hash(prompt)) % 99999
-    return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&seed={seed}"
+async def generate_image(prompt: str) -> bytes | None:
+    # Hugging Face - SDXL
+    try:
+        API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+        headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+        payload = {"inputs": prompt}
+        logging.info(f"HF ga rasm so'rovi: {prompt}")
 
-# === GROQ AI ===
+        async with aiohttp.ClientSession() as session:
+            async with session.post(API_URL, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=120)) as response:
+                logging.info(f"HF status: {response.status}, content-type: {response.headers.get('content-type', '')}")
+                if response.status == 200:
+                    data = await response.read()
+                    if len(data) > 5000:
+                        logging.info(f"HF muvaffaqiyatli! {len(data)} bytes")
+                        return data
+                    else:
+                        text = await response.text() if len(data) < 1000 else "binary data"
+                        logging.error(f"HF kichik javob: {len(data)} bytes")
+                else:
+                    error = await response.text()
+                    logging.error(f"HF xatosi {response.status}: {error}")
+    except Exception as e:
+        logging.error(f"HF exception: {e}")
+    return None
+
 async def get_ai_response(text: str, lang: str) -> str:
     try:
         if lang == "uz":
@@ -170,7 +185,6 @@ async def get_ai_response(text: str, lang: str) -> str:
         else:
             return "❌ An error occurred. Please try again."
 
-# === ASOSIY HANDLER ===
 @dp.message(UserState.main_menu)
 async def message_handler(message: Message, state: FSMContext):
     text = message.text or ""
@@ -192,27 +206,25 @@ async def message_handler(message: Message, state: FSMContext):
             return
 
         wait_msg = await message.answer(TEXTS[lang]["generating_image"])
-
-        # Tarjima
         prompt_en = await translate_to_english(prompt, lang)
-        logging.info(f"Prompt: '{prompt}' -> '{prompt_en}'")
+        logging.info(f"Prompt tarjima: '{prompt}' -> '{prompt_en}'")
 
-        # URL yaratish
-        image_url = generate_image_url(prompt_en)
-        logging.info(f"Rasm URL: {image_url}")
+        image_data = await generate_image(prompt_en)
 
         try:
             await wait_msg.delete()
         except:
             pass
 
-        try:
-            photo = URLInputFile(image_url, filename="image.png", timeout=60)
-            await message.answer_photo(photo, caption=f"🎨 {prompt}")
-        except Exception as e:
-            logging.error(f"Rasm yuborishda xato: {e}")
-            # Fallback: URL ni matn sifatida yuborish
-            await message.answer(f"🎨 {prompt}\n\n{image_url}")
+        if image_data:
+            try:
+                photo = BufferedInputFile(image_data, filename="image.png")
+                await message.answer_photo(photo, caption=f"🎨 {prompt}")
+            except Exception as e:
+                logging.error(f"Yuborishda xato: {e}")
+                await message.answer(TEXTS[lang]["image_error"])
+        else:
+            await message.answer(TEXTS[lang]["image_error"])
 
     else:
         if not text:
@@ -229,7 +241,6 @@ async def message_handler(message: Message, state: FSMContext):
         else:
             await message.answer(response)
 
-# === ISHGA TUSHIRISH ===
 async def main():
     print("🤖 AI Javobchi bot ishga tushdi!")
     await dp.start_polling(bot)

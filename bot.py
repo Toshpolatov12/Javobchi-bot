@@ -114,33 +114,66 @@ async def back_to_language(message: Message, state: FSMContext):
         reply_markup=get_language_keyboard()
     )
 
-# === RASM GENERATSIYA ===
+# === TARJIMA FUNKSIYASI (O'zbek/Rus -> Ingliz) ===
+async def translate_to_english(prompt: str, lang: str) -> str:
+    if lang == "en":
+        return prompt
+    
+    try:
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": [
+                {"role": "system", "content": "Translate the following text to English for image generation. Return ONLY the translated text, nothing else."},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 200
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        logging.error(f"Tarjima xatosi: {e}")
+    
+    return prompt  # Xato bo'lsa asl promptni qaytaradi
+
+# === RASM GENERATSIYA (TO'G'RILANGAN) ===
 async def generate_image(prompt: str) -> bytes | None:
     logging.info(f"Rasm yaratilmoqda: {prompt}")
     
-    # Avval Pollinations AI - eng tez
+    encoded = urllib.parse.quote(prompt)
+    seed = abs(hash(prompt)) % 99999
+    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&seed={seed}"
+    logging.info(f"Pollinations AI URL: {url}")
+    
     try:
-        encoded = urllib.parse.quote(prompt)
-        url = f"https://pollinations.ai/p/{encoded}?width=1024&height=1024&nologo=true"
-        logging.info(f"Pollinations AI: {url}")
-        
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=90)) as resp:
                 if resp.status == 200:
-                    logging.info("Pollinations AI muvaffaqiyatli!")
-                    return await resp.read()
+                    content_type = resp.headers.get('content-type', '')
+                    if 'image' in content_type:
+                        logging.info("Pollinations AI muvaffaqiyatli!")
+                        return await resp.read()
+                    else:
+                        logging.error(f"Noto'g'ri content-type: {content_type}")
                 else:
                     logging.error(f"Pollinations xatosi: {resp.status}")
     except Exception as e:
         logging.error(f"Pollinations xatosi: {e}")
-    
-    # Fallback: Hugging Face (yangi URL)
+
+    # Fallback: Hugging Face
     if HF_API_KEY:
         try:
             API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-3.5-large"
             headers = {"Authorization": f"Bearer {HF_API_KEY}"}
             payload = {"inputs": prompt}
-            logging.info("Hugging Face SD3.5 ishga tushdi...")
+            logging.info("Hugging Face ishga tushdi...")
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(API_URL, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=90)) as response:
@@ -152,28 +185,13 @@ async def generate_image(prompt: str) -> bytes | None:
                         logging.error(f"HF xatosi: {response.status} - {error_text}")
         except Exception as e:
             logging.error(f"HF xatosi: {e}")
-    
-    # Final fallback: fal.ai (hech qanday API key kerak emas)
-    try:
-        encoded = urllib.parse.quote(prompt)
-        url = f"https://fal.run/fal-ai/fast-sdxl/image?prompt={encoded}"
-        logging.info("fal.ai ishga tushdi...")
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=90)) as resp:
-                if resp.status == 200:
-                    logging.info("fal.ai muvaffaqiyatli!")
-                    return await resp.read()
-    except Exception as e:
-        logging.error(f"fal.ai xatosi: {e}")
-    
+
     logging.error("Rasm yaratish muvaffaqiyatsiz!")
     return None
 
 # === GROQ AI JAVOB ===
 async def get_ai_response(text: str, lang: str) -> str:
     try:
-        # Tilga mos system prompt
         if lang == "uz":
             system_msg = "Sen yordamchi AI assistantsan. O'zbek tilida aniq va tushunarli javob ber."
         elif lang == "ru":
@@ -220,11 +238,9 @@ async def get_ai_response(text: str, lang: str) -> str:
 async def message_handler(message: Message, state: FSMContext):
     text = message.text or ""
     
-    # Til olish
     data = await state.get_data()
     lang = data.get("language", "uz")
     
-    # Rasm so'rovi tekshirish
     image_keywords = {
         "uz": ["rasm:", "Rasm:"],
         "ru": ["изображение:", "Изображение:", "картинка:", "Картинка:"],
@@ -234,7 +250,6 @@ async def message_handler(message: Message, state: FSMContext):
     is_image_request = any(text.lower().startswith(kw.lower()) for kw in image_keywords[lang])
     
     if is_image_request:
-        # Rasm yaratish
         prompt = text.split(":", 1)[1].strip() if ":" in text else ""
         
         if not prompt:
@@ -247,7 +262,12 @@ async def message_handler(message: Message, state: FSMContext):
             return
         
         wait_msg = await message.answer(TEXTS[lang]["generating_image"])
-        image_data = await generate_image(prompt)
+        
+        # O'zbekcha/Ruscha promptni inglizchaga tarjima qilish
+        prompt_en = await translate_to_english(prompt, lang)
+        logging.info(f"Tarjima: '{prompt}' -> '{prompt_en}'")
+        
+        image_data = await generate_image(prompt_en)
         await wait_msg.delete()
         
         if image_data:
@@ -257,21 +277,11 @@ async def message_handler(message: Message, state: FSMContext):
                 await message.answer_photo(photo, caption=f"🎨 {prompt}")
             except Exception as e:
                 logging.error(f"Rasm yuborishda xato: {e}")
-                # Agar fayl yuklash ishlamasa, URL yuboramiz
-                from aiogram.types import URLInputFile
-                try:
-                    encoded = urllib.parse.quote(prompt)
-                    image_url = f"https://pollinations.ai/p/{encoded}"
-                    photo_url = URLInputFile(image_url, filename="image.png")
-                    await message.answer_photo(photo_url, caption=f"🎨 {prompt}")
-                except Exception as e2:
-                    logging.error(f"URL yuborishda xato: {e2}")
-                    await message.answer(f"🎨 Rasm tayyor!\n{image_url}")
+                await message.answer(TEXTS[lang]["image_error"])
         else:
             await message.answer(TEXTS[lang]["image_error"])
     
     else:
-        # AI javob
         if not text:
             return
         
@@ -279,7 +289,6 @@ async def message_handler(message: Message, state: FSMContext):
         response = await get_ai_response(text, lang)
         await wait_msg.delete()
         
-        # Javob uzun bo'lsa bo'lib yuborish
         if len(response) > 4000:
             chunks = [response[i:i+4000] for i in range(0, len(response), 4000)]
             for chunk in chunks:

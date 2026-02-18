@@ -3,105 +3,145 @@ import asyncio
 import aiohttp
 import os
 import urllib.parse
-from aiogram import Bot, Dispatcher, F
+import google.generativeai as genai
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, BufferedInputFile
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from dotenv import load_dotenv
 
-load_dotenv()
+# === KALITLAR ===
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+HF_API_KEY = os.environ.get("HF_API_KEY")
 
-BOT_TOKEN = os.getenv("API_key")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
+# === LOGGING ===
 logging.basicConfig(level=logging.INFO)
 
+# === GEMINI SOZLASH ===
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-1.5-flash")
+
+# === BOT VA DISPATCHER ===
 storage = MemoryStorage()
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=storage)
 
+# === STATE ===
 class UserState(StatesGroup):
-    language = State()
+    choosing_language = State()
+    main_menu = State()
 
+# === MATNLAR ===
 TEXTS = {
     "uz": {
-        "choose_lang": "🌐 Tilni tanlang / Choose language / Выберите язык:",
-        "welcome": "👋 Salom, *{name}*! Men *AI Javobchi* botman!\n\n🤖 *Nima qila olaman:*\n• Har qanday savolingizga javob beraman\n• Rasm yaratib beraman\n\n📝 *Qanday ishlatish:*\n• Shunchaki savol yozing — AI javob beradi\n• *Rasm:* so'zidan keyin tavsif yozing\n  _Masalan:_ `Rasm: tog'lar va ko'k osmon`\n\n❓ Boshlang!",
-        "help": "🆘 *Yordam*\n\n• Savol yozing → AI javob beradi\n• `Rasm: [tavsif]` → Rasm yaratiladi",
+        "welcome": "👋 Assalomu aleykum! Tilni tanlang:",
+        "language_selected": "✅ Til tanlandi: O'zbek\n\n🤖 Men AI yordamchiman!\n\n📝 Qanday ishlatish:\n• Savol yozing — javob beraman\n• 'Rasm:' dan keyin tavsif yozing — rasm yarataman\n\n💡 Misol:\n• Python nima?\n• Rasm: tog'lar va ko'k osmon",
+        "ask_question": "❓ Savolingizni yozing yoki 'Rasm:' buyrug'ini ishlating:",
         "thinking": "🤔 O'ylamoqda...",
-        "generating": "🎨 Rasm yaratilmoqda... ⏳",
-        "error": "❌ Xatolik yuz berdi. Iltimos qayta urinib ko'ring.",
-        "image_error": "❌ Rasm yaratishda xatolik.",
-        "back": "⬅️ Ortga",
-        "lang_changed": "✅ Til o'zgartirildi!"
+        "generating_image": "🎨 Rasm yaratilmoqda... Biroz kuting ⏳",
+        "image_error": "❌ Rasm yaratishda xatolik. Qayta urinib ko'ring.",
+        "back": "🔙 Ortga",
+        "choose_language": "🌐 Til tanlash",
     },
     "ru": {
-        "choose_lang": "🌐 Tilni tanlang / Choose language / Выберите язык:",
-        "welcome": "👋 Здравствуйте, *{name}*! Я *AI Помощник* бот!\n\n🤖 *Что я умею:*\n• Отвечаю на любые вопросы\n• Генерирую изображения\n\n📝 *Как использовать:*\n• Просто напишите вопрос — AI ответит\n• Слово *Картинка:* затем описание\n  _Например:_ `Картинка: горы и голубое небо`\n\n❓ Начнем!",
-        "help": "🆘 *Помощь*\n\n• Напишите вопрос → AI ответит\n• `Картинка: [описание]` → Создам изображение",
+        "welcome": "👋 Здравствуйте! Выберите язык:",
+        "language_selected": "✅ Язык выбран: Русский\n\n🤖 Я AI помощник!\n\n📝 Как использовать:\n• Напишите вопрос — отвечу\n• Напишите 'Изображение:' и описание — создам картинку\n\n💡 Пример:\n• Что такое Python?\n• Изображение: горы и голубое небо",
+        "ask_question": "❓ Напишите ваш вопрос или используйте команду 'Изображение:':",
         "thinking": "🤔 Думаю...",
-        "generating": "🎨 Генерирую изображение... ⏳",
-        "error": "❌ Произошла ошибка. Попробуйте еще раз.",
-        "image_error": "❌ Ошибка при создании изображения.",
-        "back": "⬅️ Назад",
-        "lang_changed": "✅ Язык изменен!"
+        "generating_image": "🎨 Создаю изображение... Подождите ⏳",
+        "image_error": "❌ Ошибка при создании изображения. Попробуйте снова.",
+        "back": "🔙 Назад",
+        "choose_language": "🌐 Выбор языка",
     },
     "en": {
-        "choose_lang": "🌐 Tilni tanlang / Choose language / Выберите язык:",
-        "welcome": "👋 Hello, *{name}*! I'm *AI Assistant* bot!\n\n🤖 *What I can do:*\n• Answer any questions\n• Generate images\n\n📝 *How to use:*\n• Just write a question — AI will answer\n• Word *Image:* then description\n  _Example:_ `Image: mountains and blue sky`\n\n❓ Let's start!",
-        "help": "🆘 *Help*\n\n• Write a question → AI will answer\n• `Image: [description]` → Generate image",
+        "welcome": "👋 Hello! Choose your language:",
+        "language_selected": "✅ Language selected: English\n\n🤖 I'm an AI assistant!\n\n📝 How to use:\n• Ask a question — I'll answer\n• Type 'Image:' followed by description — I'll generate it\n\n💡 Example:\n• What is Python?\n• Image: mountains and blue sky",
+        "ask_question": "❓ Type your question or use 'Image:' command:",
         "thinking": "🤔 Thinking...",
-        "generating": "🎨 Generating image... ⏳",
-        "error": "❌ An error occurred. Please try again.",
-        "image_error": "❌ Error generating image.",
-        "back": "⬅️ Back",
-        "lang_changed": "✅ Language changed!"
+        "generating_image": "🎨 Generating image... Please wait ⏳",
+        "image_error": "❌ Error generating image. Please try again.",
+        "back": "🔙 Back",
+        "choose_language": "🌐 Choose Language",
     }
 }
 
+# === KLAVIATURA ===
 def get_language_keyboard():
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🇺🇿 O'zbek", callback_data="lang_uz")],
-        [InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang_ru")],
-        [InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en")]
-    ])
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🇺🇿 O'zbek"), KeyboardButton(text="🇷🇺 Русский")],
+            [KeyboardButton(text="🇬🇧 English")]
+        ],
+        resize_keyboard=True
+    )
     return keyboard
 
 def get_back_keyboard(lang):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=TEXTS[lang]["back"], callback_data="back_to_lang")]
-    ])
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=TEXTS[lang]["back"])]
+        ],
+        resize_keyboard=True
+    )
     return keyboard
 
-async def get_ai_response(text: str, lang: str) -> str:
+# === /start KOMANDASI ===
+@dp.message(Command("start"))
+async def start_handler(message: Message, state: FSMContext):
+    await state.set_state(UserState.choosing_language)
+    await message.answer(
+        "👋 Assalomu aleykum! / Здравствуйте! / Hello!\n\n🌐 Tilni tanlang / Выберите язык / Choose language:",
+        reply_markup=get_language_keyboard()
+    )
+
+# === TIL TANLASH ===
+@dp.message(UserState.choosing_language)
+async def language_selected(message: Message, state: FSMContext):
+    text = message.text
+    
+    if "🇺🇿" in text or text == "uz":
+        lang = "uz"
+    elif "🇷🇺" in text or text == "ru":
+        lang = "ru"
+    elif "🇬🇧" in text or text == "en":
+        lang = "en"
+    else:
+        await message.answer("Iltimos, tilni tanlang / Пожалуйста, выберите язык / Please choose a language:")
+        return
+    
+    await state.update_data(language=lang)
+    await state.set_state(UserState.main_menu)
+    
+    await message.answer(
+        TEXTS[lang]["language_selected"],
+        reply_markup=get_back_keyboard(lang)
+    )
+
+# === ORTGA QAYTISH ===
+@dp.message(F.text.in_(["🔙 Ortga", "🔙 Назад", "🔙 Back"]))
+async def back_to_language(message: Message, state: FSMContext):
+    await state.set_state(UserState.choosing_language)
+    await message.answer(
+        "🌐 Tilni tanlang / Выберите язык / Choose language:",
+        reply_markup=get_language_keyboard()
+    )
+
+# === RASM GENERATSIYA ===
+async def generate_image(prompt: str) -> bytes | None:
     try:
-        # Tilga qarab so'rovni tarjima qilish uchun prompt qo'shamiz
-        prompt_prefix = {
-            "uz": "Javobni o'zbek tilida ber: ",
-            "ru": "Ответь на русском языке: ",
-            "en": "Answer in English: "
-        }
-        
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={GEMINI_API_KEY}"
-        payload = {"contents": [{"parts": [{"text": prompt_prefix[lang] + text}]}]}
+        API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+        headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+        payload = {"inputs": prompt}
         
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                data = await resp.json()
-                if "candidates" in data:
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
-                elif "error" in data:
-                    logging.error(f"Gemini error: {data['error']}")
-                    return TEXTS[lang]["error"]
-                else:
-                    return TEXTS[lang]["error"]
+            async with session.post(API_URL, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                if response.status == 200:
+                    return await response.read()
     except Exception as e:
-        logging.error(f"Gemini xatosi: {e}")
-        return TEXTS[lang]["error"]
-
-async def generate_image(prompt: str) -> bytes | None:
+        logging.error(f"HF xatosi: {e}")
+    
     try:
         encoded = urllib.parse.quote(prompt)
         url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true"
@@ -109,92 +149,92 @@ async def generate_image(prompt: str) -> bytes | None:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
                 if resp.status == 200:
                     return await resp.read()
-    except Exception as e:
-        logging.error(f"Rasm xatosi: {e}")
+    except Exception as e2:
+        logging.error(f"Pollinations xatosi: {e2}")
     return None
 
-@dp.message(Command("start"))
-async def start_handler(message: Message, state: FSMContext):
-    await message.answer(
-        TEXTS["uz"]["choose_lang"],
-        reply_markup=get_language_keyboard()
-    )
+# === AI JAVOB ===
+async def get_ai_response(text: str, lang: str) -> str:
+    try:
+        # Tilga mos prompt
+        if lang == "uz":
+            prompt = f"O'zbek tilida javob ber: {text}"
+        elif lang == "ru":
+            prompt = f"Ответь на русском языке: {text}"
+        else:
+            prompt = f"Answer in English: {text}"
+        
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        logging.error(f"Gemini xatosi: {e}")
+        if lang == "uz":
+            return "❌ Xatolik yuz berdi. Iltimos qayta urinib ko'ring."
+        elif lang == "ru":
+            return "❌ Произошла ошибка. Пожалуйста, попробуйте снова."
+        else:
+            return "❌ An error occurred. Please try again."
 
-@dp.callback_query(F.data.startswith("lang_"))
-async def language_callback(callback: CallbackQuery, state: FSMContext):
-    lang = callback.data.split("_")[1]
-    await state.update_data(language=lang)
+# === ASOSIY XABAR HANDLER ===
+@dp.message(UserState.main_menu)
+async def message_handler(message: Message, state: FSMContext):
+    text = message.text or ""
     
-    user = callback.from_user
-    name = user.first_name or user.username or "Do'stim"
-    
-    await callback.message.edit_text(
-        TEXTS[lang]["welcome"].format(name=name),
-        parse_mode="Markdown",
-        reply_markup=get_back_keyboard(lang)
-    )
-    await callback.answer()
-
-@dp.callback_query(F.data == "back_to_lang")
-async def back_to_language(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text(
-        TEXTS["uz"]["choose_lang"],
-        reply_markup=get_language_keyboard()
-    )
-    await callback.answer()
-
-@dp.message(Command("help"))
-async def help_handler(message: Message, state: FSMContext):
+    # Til olish
     data = await state.get_data()
     lang = data.get("language", "uz")
-    await message.answer(TEXTS[lang]["help"], parse_mode="Markdown")
-
-@dp.message()
-async def message_handler(message: Message, state: FSMContext):
-    data = await state.get_data()
-    lang = data.get("language")
     
-    if not lang:
-        await message.answer(
-            TEXTS["uz"]["choose_lang"],
-            reply_markup=get_language_keyboard()
-        )
-        return
-    
-    text = message.text or ""
-    if not text:
-        return
-
-    # Tilga qarab rasm so'zlarini aniqlash
+    # Rasm so'rovi tekshirish
     image_keywords = {
-        "uz": ["rasm:", "rasm :", "Rasm:", "RASM:"],
-        "ru": ["картинка:", "Картинка:", "КАРТИНКА:", "картинка :", "Картинка :", "изображение:", "Изображение:"],
-        "en": ["image:", "Image:", "IMAGE:", "image :", "Image :", "picture:", "Picture:"]
+        "uz": ["rasm:", "Rasm:"],
+        "ru": ["изображение:", "Изображение:", "картинка:", "Картинка:"],
+        "en": ["image:", "Image:", "picture:", "Picture:"]
     }
     
-    is_image_request = any(text.lower().startswith(kw.lower()) for kw in image_keywords[lang])
+    is_image_request = any(text.startswith(kw) for kw in image_keywords[lang])
     
     if is_image_request:
-        prompt = text.split(":", 1)[1].strip() if ":" in text else text
+        # Rasm yaratish
+        prompt = text.split(":", 1)[1].strip() if ":" in text else ""
+        
         if not prompt:
-            await message.answer("📝 " + ("Rasm tavsifini yozing!" if lang == "uz" else "Опишите изображение!" if lang == "ru" else "Describe the image!"))
+            await message.answer(
+                "📝 Rasm tavsifini yozing!" if lang == "uz" 
+                else "📝 Напишите описание изображения!" if lang == "ru"
+                else "📝 Write image description!",
+                reply_markup=get_back_keyboard(lang)
+            )
             return
         
-        wait_msg = await message.answer(TEXTS[lang]["generating"])
+        wait_msg = await message.answer(TEXTS[lang]["generating_image"])
         image_data = await generate_image(prompt)
         await wait_msg.delete()
         
         if image_data:
+            from aiogram.types import BufferedInputFile
             photo = BufferedInputFile(image_data, filename="image.jpg")
-            await message.answer_photo(photo, caption=f"🎨 *{prompt}*", parse_mode="Markdown")
+            await message.answer_photo(photo, caption=f"🎨 {prompt}")
         else:
             await message.answer(TEXTS[lang]["image_error"])
+    
     else:
+        # AI javob
+        if not text:
+            return
+        
         wait_msg = await message.answer(TEXTS[lang]["thinking"])
         response = await get_ai_response(text, lang)
         await wait_msg.delete()
-        await message.answer(response)
+        
+        # Javob uzun bo'lsa bo'lib yuborish
+        if len(response) > 4000:
+            chunks = [response[i:i+4000] for i in range(0, len(response), 4000)]
+            for chunk in chunks:
+                await message.answer(chunk)
+        else:
+            await message.answer(response)
 
+# === BOTNI ISHGA TUSHIRISH ===
 async def main():
     print("🤖 AI Javobchi bot ishga tushdi!")
     await dp.start_polling(bot)

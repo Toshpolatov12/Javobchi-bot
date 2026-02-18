@@ -118,10 +118,10 @@ async def back_to_language(message: Message, state: FSMContext):
 async def generate_image(prompt: str) -> bytes | None:
     logging.info(f"Rasm yaratilmoqda: {prompt}")
     
-    # Avval Pollinations AI - eng tez va ishonchli
+    # Avval Pollinations AI - eng tez
     try:
         encoded = urllib.parse.quote(prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&enhance=true"
+        url = f"https://pollinations.ai/p/{encoded}?width=1024&height=1024&nologo=true"
         logging.info(f"Pollinations AI: {url}")
         
         async with aiohttp.ClientSession() as session:
@@ -134,13 +134,13 @@ async def generate_image(prompt: str) -> bytes | None:
     except Exception as e:
         logging.error(f"Pollinations xatosi: {e}")
     
-    # Fallback: Hugging Face
+    # Fallback: Hugging Face (yangi URL)
     if HF_API_KEY:
         try:
-            API_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
+            API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-3.5-large"
             headers = {"Authorization": f"Bearer {HF_API_KEY}"}
             payload = {"inputs": prompt}
-            logging.info("Hugging Face Flux ishga tushdi...")
+            logging.info("Hugging Face SD3.5 ishga tushdi...")
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(API_URL, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=90)) as response:
@@ -152,6 +152,20 @@ async def generate_image(prompt: str) -> bytes | None:
                         logging.error(f"HF xatosi: {response.status} - {error_text}")
         except Exception as e:
             logging.error(f"HF xatosi: {e}")
+    
+    # Final fallback: fal.ai (hech qanday API key kerak emas)
+    try:
+        encoded = urllib.parse.quote(prompt)
+        url = f"https://fal.run/fal-ai/fast-sdxl/image?prompt={encoded}"
+        logging.info("fal.ai ishga tushdi...")
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=90)) as resp:
+                if resp.status == 200:
+                    logging.info("fal.ai muvaffaqiyatli!")
+                    return await resp.read()
+    except Exception as e:
+        logging.error(f"fal.ai xatosi: {e}")
     
     logging.error("Rasm yaratish muvaffaqiyatsiz!")
     return None

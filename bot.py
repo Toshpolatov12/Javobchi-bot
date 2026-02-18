@@ -116,27 +116,44 @@ async def back_to_language(message: Message, state: FSMContext):
 
 # === RASM GENERATSIYA ===
 async def generate_image(prompt: str) -> bytes | None:
-    try:
-        API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
-        headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-        payload = {"inputs": prompt}
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(API_URL, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as response:
-                if response.status == 200:
-                    return await response.read()
-    except Exception as e:
-        logging.error(f"HF xatosi: {e}")
+    logging.info(f"Rasm yaratilmoqda: {prompt}")
     
+    # Avval Pollinations AI - eng tez va ishonchli
     try:
         encoded = urllib.parse.quote(prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true"
+        url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&enhance=true"
+        logging.info(f"Pollinations AI: {url}")
+        
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=90)) as resp:
                 if resp.status == 200:
+                    logging.info("Pollinations AI muvaffaqiyatli!")
                     return await resp.read()
-    except Exception as e2:
-        logging.error(f"Pollinations xatosi: {e2}")
+                else:
+                    logging.error(f"Pollinations xatosi: {resp.status}")
+    except Exception as e:
+        logging.error(f"Pollinations xatosi: {e}")
+    
+    # Fallback: Hugging Face
+    if HF_API_KEY:
+        try:
+            API_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
+            headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+            payload = {"inputs": prompt}
+            logging.info("Hugging Face Flux ishga tushdi...")
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(API_URL, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=90)) as response:
+                    if response.status == 200:
+                        logging.info("Hugging Face muvaffaqiyatli!")
+                        return await response.read()
+                    else:
+                        error_text = await response.text()
+                        logging.error(f"HF xatosi: {response.status} - {error_text}")
+        except Exception as e:
+            logging.error(f"HF xatosi: {e}")
+    
+    logging.error("Rasm yaratish muvaffaqiyatsiz!")
     return None
 
 # === GROQ AI JAVOB ===

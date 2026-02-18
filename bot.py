@@ -3,25 +3,20 @@ import asyncio
 import aiohttp
 import os
 import urllib.parse
-import google.generativeai as genai
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 # === KALITLAR ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 HF_API_KEY = os.environ.get("HF_API_KEY")
 
 # === LOGGING ===
 logging.basicConfig(level=logging.INFO)
-
-# === GEMINI SOZLASH ===
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
 
 # === BOT VA DISPATCHER ===
 storage = MemoryStorage()
@@ -36,34 +31,25 @@ class UserState(StatesGroup):
 # === MATNLAR ===
 TEXTS = {
     "uz": {
-        "welcome": "👋 Assalomu aleykum! Tilni tanlang:",
         "language_selected": "✅ Til tanlandi: O'zbek\n\n🤖 Men AI yordamchiman!\n\n📝 Qanday ishlatish:\n• Savol yozing — javob beraman\n• 'Rasm:' dan keyin tavsif yozing — rasm yarataman\n\n💡 Misol:\n• Python nima?\n• Rasm: tog'lar va ko'k osmon",
-        "ask_question": "❓ Savolingizni yozing yoki 'Rasm:' buyrug'ini ishlating:",
         "thinking": "🤔 O'ylamoqda...",
         "generating_image": "🎨 Rasm yaratilmoqda... Biroz kuting ⏳",
         "image_error": "❌ Rasm yaratishda xatolik. Qayta urinib ko'ring.",
         "back": "🔙 Ortga",
-        "choose_language": "🌐 Til tanlash",
     },
     "ru": {
-        "welcome": "👋 Здравствуйте! Выберите язык:",
         "language_selected": "✅ Язык выбран: Русский\n\n🤖 Я AI помощник!\n\n📝 Как использовать:\n• Напишите вопрос — отвечу\n• Напишите 'Изображение:' и описание — создам картинку\n\n💡 Пример:\n• Что такое Python?\n• Изображение: горы и голубое небо",
-        "ask_question": "❓ Напишите ваш вопрос или используйте команду 'Изображение:':",
         "thinking": "🤔 Думаю...",
         "generating_image": "🎨 Создаю изображение... Подождите ⏳",
         "image_error": "❌ Ошибка при создании изображения. Попробуйте снова.",
         "back": "🔙 Назад",
-        "choose_language": "🌐 Выбор языка",
     },
     "en": {
-        "welcome": "👋 Hello! Choose your language:",
         "language_selected": "✅ Language selected: English\n\n🤖 I'm an AI assistant!\n\n📝 How to use:\n• Ask a question — I'll answer\n• Type 'Image:' followed by description — I'll generate it\n\n💡 Example:\n• What is Python?\n• Image: mountains and blue sky",
-        "ask_question": "❓ Type your question or use 'Image:' command:",
         "thinking": "🤔 Thinking...",
         "generating_image": "🎨 Generating image... Please wait ⏳",
         "image_error": "❌ Error generating image. Please try again.",
         "back": "🔙 Back",
-        "choose_language": "🌐 Choose Language",
     }
 }
 
@@ -153,21 +139,44 @@ async def generate_image(prompt: str) -> bytes | None:
         logging.error(f"Pollinations xatosi: {e2}")
     return None
 
-# === AI JAVOB ===
+# === GROQ AI JAVOB ===
 async def get_ai_response(text: str, lang: str) -> str:
     try:
-        # Tilga mos prompt
+        # Tilga mos system prompt
         if lang == "uz":
-            prompt = f"O'zbek tilida javob ber: {text}"
+            system_msg = "Sen yordamchi AI assistantsan. O'zbek tilida aniq va tushunarli javob ber."
         elif lang == "ru":
-            prompt = f"Ответь на русском языке: {text}"
+            system_msg = "Ты AI-помощник. Отвечай на русском языке четко и понятно."
         else:
-            prompt = f"Answer in English: {text}"
+            system_msg = "You are a helpful AI assistant. Answer clearly and concisely in English."
         
-        response = model.generate_content(prompt)
-        return response.text
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": text}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 2000
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data["choices"][0]["message"]["content"]
+                else:
+                    error_text = await response.text()
+                    logging.error(f"Groq xatosi: {response.status} - {error_text}")
+                    raise Exception(f"Groq API error: {response.status}")
+    
     except Exception as e:
-        logging.error(f"Gemini xatosi: {e}")
+        logging.error(f"Groq xatosi: {e}")
         if lang == "uz":
             return "❌ Xatolik yuz berdi. Iltimos qayta urinib ko'ring."
         elif lang == "ru":
@@ -191,7 +200,7 @@ async def message_handler(message: Message, state: FSMContext):
         "en": ["image:", "Image:", "picture:", "Picture:"]
     }
     
-    is_image_request = any(text.startswith(kw) for kw in image_keywords[lang])
+    is_image_request = any(text.lower().startswith(kw.lower()) for kw in image_keywords[lang])
     
     if is_image_request:
         # Rasm yaratish

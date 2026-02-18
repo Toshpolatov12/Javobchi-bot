@@ -131,7 +131,7 @@ async def translate_to_english(prompt: str, lang: str) -> str:
 def generate_image_url(prompt: str) -> str:
     encoded = urllib.parse.quote(prompt)
     seed = abs(hash(prompt)) % 99999
-    return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&seed={seed}&model=flux"
+    return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&seed={seed}"
 
 # === GROQ AI ===
 async def get_ai_response(text: str, lang: str) -> str:

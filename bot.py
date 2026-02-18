@@ -13,8 +13,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+BOT_TOKEN = os.getenv("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")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 logging.basicConfig(level=logging.INFO)
 

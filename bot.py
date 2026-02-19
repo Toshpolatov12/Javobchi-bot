@@ -69,6 +69,8 @@ TEXTS = {
             "Sen AI Javobchi botsан. Bu bot https://t.me/toshpolatov12 tomonidan yaratilgan. "
             "Foydalanuvchi faqat bot haqida savol berishi mumkin. "
             "Bot nima qila olishi: AI bilan suhbat, QR kod yaratish, PDF yaratish. "
+            "AI funksiyasi haqida so'ralsa: AI Assistant aqlli suhbat qura oladi, suhbat davomida oxirgi 20 ta xabarni eslab qoladi, "
+            "ya'ni oldingi savollar va javoblar asosida muomala qiladi. Orqaga tugmasi bosilganda esa suhbat tarixi tozalanadi va yangi suhbat boshlanadi. "
             "Boshqa savollarga: 'Bosh sahifada faqat bot haqidagi ma'lumotlarni bilib olishingiz mumkin. "
             "AI Assistant tugmasini bosing!' deb javob ber. O'zbek tilida gapir."
         ),
@@ -112,6 +114,8 @@ TEXTS = {
             "Ты бот AI Javobchi, созданный https://t.me/toshpolatov12. "
             "Пользователь может спрашивать только о боте. "
             "Что умеет бот: AI чат, создание QR кода, создание PDF. "
+            "Если спросят об AI функции: AI Assistant умеет вести умный диалог, запоминает последние 20 сообщений в разговоре, "
+            "то есть отвечает с учётом предыдущих вопросов и ответов. При нажатии кнопки 'Назад' история разговора очищается и начинается заново. "
             "На другие вопросы: 'На главной странице только о боте. Нажмите AI Assistant!' Говори по-русски."
         ),
     },
@@ -154,6 +158,8 @@ TEXTS = {
             "You are AI Javobchi bot, created by https://t.me/toshpolatov12. "
             "User can only ask about the bot. "
             "Bot features: AI chat, QR code, PDF. "
+            "If asked about the AI feature: AI Assistant can hold smart conversations and remembers the last 20 messages, "
+            "meaning it responds based on previous questions and answers. When the 'Back' button is pressed, the conversation history is cleared and a new chat begins. "
             "For other questions: 'On main page you can only learn about the bot. Press AI Assistant!' Speak English."
         ),
     }
@@ -300,6 +306,8 @@ async def go_back(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     lang = data.get("language", "uz")
+    # ✅ YANGI: AI suhbat tarixini tozalash
+    await state.update_data(chat_history=[])
     await state.set_state(UserState.main_menu)
     await message.answer(TEXTS[lang]["welcome"], reply_markup=get_main_keyboard(lang))
 
@@ -387,12 +395,23 @@ async def ai_chat_handler(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     lang = data.get("language", "uz")
+
     if lang == "uz":
         system_msg = "Sen yordamchi AI assistantsan. O'zbek tilida aniq va tushunarli javob ber."
     elif lang == "ru":
         system_msg = "Ты AI-помощник. Отвечай на русском языке четко и понятно."
     else:
         system_msg = "You are a helpful AI assistant. Answer clearly and concisely in English."
+
+    # ✅ YANGI: Suhbat tarixini olish
+    chat_history = data.get("chat_history", [])
+
+    # Foydalanuvchi xabarini tarixga qo'shish
+    chat_history.append({"role": "user", "content": text})
+
+    # Tarix juda uzun bo'lib ketmasin — oxirgi 20 ta xabar saqlanadi
+    if len(chat_history) > 20:
+        chat_history = chat_history[-20:]
 
     wait_msg = await message.answer(TEXTS[lang]["thinking"])
     try:
@@ -402,7 +421,7 @@ async def ai_chat_handler(message: Message, state: FSMContext):
             "model": "llama-3.3-70b-versatile",
             "messages": [
                 {"role": "system", "content": system_msg},
-                {"role": "user", "content": text}
+                *chat_history  # ✅ Butun suhbat tarixi yuboriladi
             ],
             "temperature": 0.7,
             "max_tokens": 2000
@@ -417,6 +436,13 @@ async def ai_chat_handler(message: Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Groq xatosi: {e}")
         reply = TEXTS[lang]["qr_error"]
+
+    # ✅ YANGI: AI javobini ham tarixga qo'shish
+    chat_history.append({"role": "assistant", "content": reply})
+
+    # Tarixni saqlash
+    await state.update_data(chat_history=chat_history)
+
     try:
         await wait_msg.delete()
     except:

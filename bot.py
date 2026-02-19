@@ -24,54 +24,100 @@ dp = Dispatcher(storage=storage)
 class UserState(StatesGroup):
     choosing_language = State()
     main_menu = State()
+    ai_chat = State()
     qr_waiting = State()
     pdf_waiting = State()
 
 TEXTS = {
     "uz": {
-        "welcome": "✅ Til tanlandi: O'zbek\n\n🤖 Men AI yordamchiman!\nIstalgan savol yozing, javob beraman.",
-        "thinking": "🤔 O'ylamoqda...",
-        "qr_btn": "📷 QR Kod yaratish",
+        "welcome": (
+            "👋 Salom! Men AI Javobchi botman!\n\n"
+            "📌 Quyidagi tugmalardan birini tanlang.\n\n"
+            "💡 Bot haqida savol bersangiz, javob beraman!"
+        ),
+        "ai_btn": "🤖 AI Assistant",
+        "qr_btn": "📷 QR Kod yaratuvchi",
         "pdf_btn": "📄 PDF Generator",
-        "qr_prompt": "📝 Quyidagilardan birini yuboring:\n\n• Matn yoki link → QR kodga aylanadi\n• Rasm 🖼 → yuklab, linkini QR qiladi\n• Ovoz/qo'shiq 🎵 → yuklab, linkini QR qiladi\n\n(Orqaga: /start)",
+        "back_btn": "🔙 Orqaga",
+        "main_info": "ℹ️ Bu sahifada faqat bot haqidagi ma'lumotlarni bilib olishingiz mumkin.\n\nBot haqida savol bering!",
+        "ai_welcome": "🤖 AI Assistant yoqildi!\nIstalgan savolingizni yozing, javob beraman.\n\n(Orqaga qaytish uchun: 🔙 Orqaga)",
+        "thinking": "🤔 O'ylamoqda...",
+        "qr_prompt": "📷 Quyidagilardan birini yuboring:\n• Matn yoki link\n• Rasm 🖼\n• Ovoz/audio 🎵\n\n(Orqaga: 🔙 Orqaga)",
         "qr_uploading": "⏳ Fayl yuklanmoqda...",
         "qr_success": "✅ QR kod tayyor!",
-        "qr_file_success": "✅ Fayl yuklandi va QR kod tayyor!\n🔗 Link (1 kun amal qiladi):",
+        "qr_file_success": "✅ Fayl yuklandi va QR kod tayyor!\n🔗 Link:",
         "qr_error": "❌ Xatolik yuz berdi.",
-        "pdf_prompt": "📄 Matningizni yuboring, PDF ga aylantirib beraman!\n\n💡 Yuborishingiz mumkin:\n• Istalgan matn\n• Maqola yoki hujjat\n• Ro'yxat\n\n(Orqaga: /start)",
+        "pdf_prompt": "📄 Matningizni yuboring, PDF ga aylantirib beraman!\n\n(Orqaga: 🔙 Orqaga)",
         "pdf_success": "✅ PDF tayyor!",
         "pdf_error": "❌ PDF yaratishda xatolik.",
         "pdf_processing": "⏳ PDF yaratilmoqda...",
+        "bot_system": (
+            "Sen AI Javobchi botsан. Bu bot https://t.me/toshpolatov12 tomonidan yaratilgan. "
+            "Foydalanuvchi faqat bot haqida savol berishi mumkin. "
+            "Bot nima qila olishi: AI bilan suhbat, QR kod yaratish, PDF yaratish. "
+            "Boshqa savollarga: 'Bosh sahifada faqat bot haqidagi ma'lumotlarni bilib olishingiz mumkin. "
+            "AI Assistant tugmasini bosing!' deb javob ber. O'zbek tilida gapir."
+        ),
     },
     "ru": {
-        "welcome": "✅ Язык выбран: Русский\n\n🤖 Я AI помощник!\nЗадайте любой вопрос, я отвечу.",
-        "thinking": "🤔 Думаю...",
-        "qr_btn": "📷 Создать QR код",
+        "welcome": (
+            "👋 Привет! Я AI Javobchi бот!\n\n"
+            "📌 Выберите одну из кнопок ниже.\n\n"
+            "💡 Можете задать вопрос о боте!"
+        ),
+        "ai_btn": "🤖 AI Assistant",
+        "qr_btn": "📷 QR Код генератор",
         "pdf_btn": "📄 PDF Генератор",
-        "qr_prompt": "📝 Отправьте одно из следующего:\n\n• Текст или ссылку → QR код\n• Изображение 🖼 → загрузит и сделает QR\n• Аудио/музыку 🎵 → загрузит и сделает QR\n\n(Назад: /start)",
+        "back_btn": "🔙 Назад",
+        "main_info": "ℹ️ На этой странице вы можете узнать информацию о боте.\n\nЗадайте вопрос о боте!",
+        "ai_welcome": "🤖 AI Assistant включён!\nЗадайте любой вопрос, я отвечу.\n\n(Назад: 🔙 Назад)",
+        "thinking": "🤔 Думаю...",
+        "qr_prompt": "📷 Отправьте одно из следующего:\n• Текст или ссылку\n• Изображение 🖼\n• Аудио/голос 🎵\n\n(Назад: 🔙 Назад)",
         "qr_uploading": "⏳ Загрузка файла...",
         "qr_success": "✅ QR код готов!",
-        "qr_file_success": "✅ Файл загружен, QR код готов!\n🔗 Ссылка (действует 1 день):",
+        "qr_file_success": "✅ Файл загружен, QR готов!\n🔗 Ссылка:",
         "qr_error": "❌ Произошла ошибка.",
-        "pdf_prompt": "📄 Отправьте текст, преобразую в PDF!\n\n💡 Можно отправить:\n• Любой текст\n• Статью или документ\n• Список\n\n(Назад: /start)",
+        "pdf_prompt": "📄 Отправьте текст, преобразую в PDF!\n\n(Назад: 🔙 Назад)",
         "pdf_success": "✅ PDF готов!",
         "pdf_error": "❌ Ошибка при создании PDF.",
         "pdf_processing": "⏳ Создаю PDF...",
+        "bot_system": (
+            "Ты бот AI Javobchi, созданный https://t.me/toshpolatov12. "
+            "Пользователь может спрашивать только о боте. "
+            "Что умеет бот: AI чат, создание QR кода, создание PDF. "
+            "На другие вопросы отвечай: 'На главной странице вы можете узнать только о боте. "
+            "Нажмите кнопку AI Assistant!' Говори по-русски."
+        ),
     },
     "en": {
-        "welcome": "✅ Language: English\n\n🤖 I'm an AI assistant!\nAsk me anything.",
-        "thinking": "🤔 Thinking...",
-        "qr_btn": "📷 Create QR Code",
+        "welcome": (
+            "👋 Hello! I'm AI Javobchi bot!\n\n"
+            "📌 Choose one of the buttons below.\n\n"
+            "💡 You can ask questions about the bot!"
+        ),
+        "ai_btn": "🤖 AI Assistant",
+        "qr_btn": "📷 QR Code Creator",
         "pdf_btn": "📄 PDF Generator",
-        "qr_prompt": "📝 Send one of the following:\n\n• Text or link → QR code\n• Image 🖼 → uploads and makes QR\n• Audio/music 🎵 → uploads and makes QR\n\n(Back: /start)",
+        "back_btn": "🔙 Back",
+        "main_info": "ℹ️ On this page you can only learn about the bot.\n\nAsk a question about the bot!",
+        "ai_welcome": "🤖 AI Assistant activated!\nAsk me anything.\n\n(Back: 🔙 Back)",
+        "thinking": "🤔 Thinking...",
+        "qr_prompt": "📷 Send one of the following:\n• Text or link\n• Image 🖼\n• Audio/voice 🎵\n\n(Back: 🔙 Back)",
         "qr_uploading": "⏳ Uploading file...",
         "qr_success": "✅ QR code ready!",
-        "qr_file_success": "✅ File uploaded, QR code ready!\n🔗 Link (valid 1 day):",
+        "qr_file_success": "✅ File uploaded, QR ready!\n🔗 Link:",
         "qr_error": "❌ An error occurred.",
-        "pdf_prompt": "📄 Send text and I'll convert it to PDF!\n\n💡 You can send:\n• Any text\n• Article or document\n• List\n\n(Back: /start)",
+        "pdf_prompt": "📄 Send text and I'll convert it to PDF!\n\n(Back: 🔙 Back)",
         "pdf_success": "✅ PDF ready!",
         "pdf_error": "❌ Error creating PDF.",
         "pdf_processing": "⏳ Creating PDF...",
+        "bot_system": (
+            "You are AI Javobchi bot, created by https://t.me/toshpolatov12. "
+            "User can only ask about the bot. "
+            "Bot features: AI chat, QR code creation, PDF creation. "
+            "For other questions say: 'On the main page you can only learn about the bot. "
+            "Press AI Assistant button!' Speak in English."
+        ),
     }
 }
 
@@ -87,8 +133,15 @@ def get_language_keyboard():
 def get_main_keyboard(lang):
     return ReplyKeyboardMarkup(
         keyboard=[
+            [KeyboardButton(text=TEXTS[lang]["ai_btn"])],
             [KeyboardButton(text=TEXTS[lang]["qr_btn"]), KeyboardButton(text=TEXTS[lang]["pdf_btn"])]
         ],
+        resize_keyboard=True
+    )
+
+def get_back_keyboard(lang):
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=TEXTS[lang]["back_btn"])]],
         resize_keyboard=True
     )
 
@@ -102,7 +155,7 @@ def make_qr(data: str) -> bytes:
     buf.seek(0)
     return buf.read()
 
-async def upload_to_fileio(file_bytes: bytes, filename: str) -> str | None:
+async def upload_to_fileio(file_bytes: bytes, filename: str):
     try:
         async with aiohttp.ClientSession() as session:
             form = aiohttp.FormData()
@@ -117,6 +170,7 @@ async def upload_to_fileio(file_bytes: bytes, filename: str) -> str | None:
         logging.error(f"file.io xatosi: {e}")
     return None
 
+# === /start ===
 @dp.message(Command("start"))
 async def start_handler(message: Message, state: FSMContext):
     await state.set_state(UserState.choosing_language)
@@ -125,6 +179,7 @@ async def start_handler(message: Message, state: FSMContext):
         reply_markup=get_language_keyboard()
     )
 
+# === TIL TANLASH ===
 @dp.message(UserState.choosing_language)
 async def language_selected(message: Message, state: FSMContext):
     text = message.text or ""
@@ -141,21 +196,129 @@ async def language_selected(message: Message, state: FSMContext):
     await state.set_state(UserState.main_menu)
     await message.answer(TEXTS[lang]["welcome"], reply_markup=get_main_keyboard(lang))
 
-@dp.message(UserState.main_menu, F.text.in_(["📷 QR Kod yaratish", "📷 Создать QR код", "📷 Create QR Code"]))
+# === ORQAGA ===
+@dp.message(F.text.in_(["🔙 Orqaga", "🔙 Назад", "🔙 Back"]))
+async def go_back(message: Message, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    await state.set_state(UserState.main_menu)
+    await message.answer(TEXTS[lang]["welcome"], reply_markup=get_main_keyboard(lang))
+
+# === AI TUGMASI ===
+@dp.message(F.text.in_(["🤖 AI Assistant"]))
+async def ai_start(message: Message, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    await state.set_state(UserState.ai_chat)
+    await message.answer(TEXTS[lang]["ai_welcome"], reply_markup=get_back_keyboard(lang))
+
+# === QR KOD TUGMASI ===
+@dp.message(F.text.in_(["📷 QR Kod yaratuvchi", "📷 QR Код генератор", "📷 QR Code Creator"]))
 async def qr_start(message: Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get("language", "uz")
     await state.set_state(UserState.qr_waiting)
-    await message.answer(TEXTS[lang]["qr_prompt"])
+    await message.answer(TEXTS[lang]["qr_prompt"], reply_markup=get_back_keyboard(lang))
 
-@dp.message(UserState.main_menu, F.text.in_(["📄 PDF Generator", "📄 PDF Генератор"]))
+# === PDF TUGMASI ===
+@dp.message(F.text.in_(["📄 PDF Generator", "📄 PDF Генератор"]))
 async def pdf_start(message: Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get("language", "uz")
     await state.set_state(UserState.pdf_waiting)
-    await message.answer(TEXTS[lang]["pdf_prompt"])
+    await message.answer(TEXTS[lang]["pdf_prompt"], reply_markup=get_back_keyboard(lang))
 
-# === QR KOD - MATN ===
+# === BOSH SAHIFA - BOT HAQIDA SAVOL ===
+@dp.message(UserState.main_menu)
+async def main_menu_handler(message: Message, state: FSMContext):
+    text = message.text or ""
+    if not text:
+        return
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+
+    wait_msg = await message.answer(TEXTS[lang]["thinking"])
+    try:
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": [
+                {"role": "system", "content": TEXTS[lang]["bot_system"]},
+                {"role": "user", "content": text}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 500
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    data2 = await response.json()
+                    reply = data2["choices"][0]["message"]["content"]
+                else:
+                    reply = TEXTS[lang]["qr_error"]
+    except Exception as e:
+        logging.error(f"Groq xatosi: {e}")
+        reply = TEXTS[lang]["qr_error"]
+
+    try:
+        await wait_msg.delete()
+    except:
+        pass
+    await message.answer(reply)
+
+# === AI CHAT ===
+@dp.message(UserState.ai_chat)
+async def ai_chat_handler(message: Message, state: FSMContext):
+    text = message.text or ""
+    if not text:
+        return
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+
+    if lang == "uz":
+        system_msg = "Sen yordamchi AI assistantsan. O'zbek tilida aniq va tushunarli javob ber."
+    elif lang == "ru":
+        system_msg = "Ты AI-помощник. Отвечай на русском языке четко и понятно."
+    else:
+        system_msg = "You are a helpful AI assistant. Answer clearly and concisely in English."
+
+    wait_msg = await message.answer(TEXTS[lang]["thinking"])
+    try:
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": text}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 2000
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    data2 = await response.json()
+                    reply = data2["choices"][0]["message"]["content"]
+                else:
+                    reply = TEXTS[lang]["qr_error"]
+    except Exception as e:
+        logging.error(f"Groq xatosi: {e}")
+        reply = TEXTS[lang]["qr_error"]
+
+    try:
+        await wait_msg.delete()
+    except:
+        pass
+
+    if len(reply) > 4000:
+        for i in range(0, len(reply), 4000):
+            await message.answer(reply[i:i+4000])
+    else:
+        await message.answer(reply)
+
+# === QR - MATN ===
 @dp.message(UserState.qr_waiting, F.text)
 async def qr_from_text(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -170,7 +333,7 @@ async def qr_from_text(message: Message, state: FSMContext):
         logging.error(f"QR xatosi: {e}")
         await message.answer(TEXTS[lang]["qr_error"])
 
-# === QR KOD - RASM ===
+# === QR - RASM ===
 @dp.message(UserState.qr_waiting, F.photo)
 async def qr_from_photo(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -196,9 +359,9 @@ async def qr_from_photo(message: Message, state: FSMContext):
         except: pass
         await message.answer(TEXTS[lang]["qr_error"])
 
-# === QR KOD - OVOZ/AUDIO ===
+# === QR - AUDIO/FAYL ===
 @dp.message(UserState.qr_waiting, F.audio | F.voice | F.document)
-async def qr_from_audio(message: Message, state: FSMContext):
+async def qr_from_file(message: Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get("language", "uz")
     wait_msg = await message.answer(TEXTS[lang]["qr_uploading"])
@@ -227,13 +390,13 @@ async def qr_from_audio(message: Message, state: FSMContext):
             await message.answer(TEXTS[lang]["qr_error"])
         await message.answer(TEXTS[lang]["qr_prompt"])
     except Exception as e:
-        logging.error(f"Audio QR xatosi: {e}")
+        logging.error(f"Fayl QR xatosi: {e}")
         try: await wait_msg.delete()
         except: pass
         await message.answer(TEXTS[lang]["qr_error"])
 
-# === PDF YARATISH ===
-@dp.message(UserState.pdf_waiting)
+# === PDF ===
+@dp.message(UserState.pdf_waiting, F.text)
 async def generate_pdf(message: Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get("language", "uz")
@@ -278,62 +441,6 @@ async def generate_pdf(message: Message, state: FSMContext):
         try: await wait_msg.delete()
         except: pass
         await message.answer(TEXTS[lang]["pdf_error"])
-
-# === AI JAVOB ===
-async def get_ai_response(text: str, lang: str) -> str:
-    try:
-        if lang == "uz":
-            system_msg = "Sen yordamchi AI assistantsan. O'zbek tilida aniq va tushunarli javob ber."
-        elif lang == "ru":
-            system_msg = "Ты AI-помощник. Отвечай на русском языке четко и понятно."
-        else:
-            system_msg = "You are a helpful AI assistant. Answer clearly and concisely in English."
-
-        url = "https://api.groq.com/openai/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-        payload = {
-            "model": "llama-3.3-70b-versatile",
-            "messages": [
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": text}
-            ],
-            "temperature": 0.7,
-            "max_tokens": 2000
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data["choices"][0]["message"]["content"]
-                else:
-                    raise Exception(f"Groq error: {response.status}")
-    except Exception as e:
-        logging.error(f"Groq xatosi: {e}")
-        if lang == "uz":
-            return "❌ Xatolik yuz berdi. Iltimos qayta urinib ko'ring."
-        elif lang == "ru":
-            return "❌ Произошла ошибка. Пожалуйста, попробуйте снова."
-        else:
-            return "❌ An error occurred. Please try again."
-
-@dp.message(UserState.main_menu)
-async def message_handler(message: Message, state: FSMContext):
-    text = message.text or ""
-    if not text:
-        return
-    data = await state.get_data()
-    lang = data.get("language", "uz")
-    wait_msg = await message.answer(TEXTS[lang]["thinking"])
-    response = await get_ai_response(text, lang)
-    try:
-        await wait_msg.delete()
-    except:
-        pass
-    if len(response) > 4000:
-        for i in range(0, len(response), 4000):
-            await message.answer(response[i:i+4000])
-    else:
-        await message.answer(response)
 
 async def main():
     print("🤖 AI Javobchi bot ishga tushdi!")

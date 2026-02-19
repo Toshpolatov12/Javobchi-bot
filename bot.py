@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 import asyncio
 import aiohttp
+
 import os
 import qrcode
 import io
@@ -13,6 +14,7 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, Buffered
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")

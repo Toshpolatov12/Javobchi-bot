@@ -7,13 +7,14 @@ import io
 from fpdf import FPDF
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+CHANNEL = "@uzinnotech"
 
 logging.basicConfig(level=logging.INFO)
 
@@ -30,6 +31,13 @@ class UserState(StatesGroup):
 
 TEXTS = {
     "uz": {
+        "subscribe_msg": (
+            "⚠️ Botdan foydalanish uchun kanalga obuna bo'lishingiz kerak!\n\n"
+            "👇 Quyidagi tugmani bosib kanalga o'ting va obuna bo'ling:"
+        ),
+        "subscribe_check": "✅ Obuna bo'ldim",
+        "subscribe_error": "❌ Siz hali obuna bo'lmagansiz!\n\nIltimos, avval kanalga obuna bo'ling 👇",
+        "subscribe_success": "✅ Obuna tasdiqlandi! Botdan foydalanishingiz mumkin.",
         "welcome": (
             "👋 Salom! Men AI Javobchi botman!\n\n"
             "📌 Quyidagi tugmalardan birini tanlang.\n\n"
@@ -39,9 +47,8 @@ TEXTS = {
         "qr_btn": "📷 QR Kod yaratuvchi",
         "pdf_btn": "📄 PDF Generator",
         "back_btn": "🔙 Orqaga",
-        "main_info": "ℹ️ Bu sahifada faqat bot haqidagi ma'lumotlarni bilib olishingiz mumkin.\n\nBot haqida savol bering!",
-        "ai_welcome": "🤖 AI Assistant yoqildi!\nIstalgan savolingizni yozing, javob beraman.\n\n(Orqaga qaytish uchun: 🔙 Orqaga)",
         "thinking": "🤔 O'ylamoqda...",
+        "ai_welcome": "🤖 AI Assistant yoqildi!\nIstalgan savolingizni yozing.\n\n(Orqaga: 🔙 Orqaga)",
         "qr_prompt": "📷 Quyidagilardan birini yuboring:\n• Matn yoki link\n• Rasm 🖼\n• Ovoz/audio 🎵\n\n(Orqaga: 🔙 Orqaga)",
         "qr_uploading": "⏳ Fayl yuklanmoqda...",
         "qr_success": "✅ QR kod tayyor!",
@@ -60,6 +67,13 @@ TEXTS = {
         ),
     },
     "ru": {
+        "subscribe_msg": (
+            "⚠️ Для использования бота нужно подписаться на канал!\n\n"
+            "👇 Нажмите кнопку ниже и подпишитесь:"
+        ),
+        "subscribe_check": "✅ Я подписался",
+        "subscribe_error": "❌ Вы ещё не подписались!\n\nПожалуйста, сначала подпишитесь на канал 👇",
+        "subscribe_success": "✅ Подписка подтверждена! Можете пользоваться ботом.",
         "welcome": (
             "👋 Привет! Я AI Javobchi бот!\n\n"
             "📌 Выберите одну из кнопок ниже.\n\n"
@@ -69,9 +83,8 @@ TEXTS = {
         "qr_btn": "📷 QR Код генератор",
         "pdf_btn": "📄 PDF Генератор",
         "back_btn": "🔙 Назад",
-        "main_info": "ℹ️ На этой странице вы можете узнать информацию о боте.\n\nЗадайте вопрос о боте!",
-        "ai_welcome": "🤖 AI Assistant включён!\nЗадайте любой вопрос, я отвечу.\n\n(Назад: 🔙 Назад)",
         "thinking": "🤔 Думаю...",
+        "ai_welcome": "🤖 AI Assistant включён!\nЗадайте любой вопрос.\n\n(Назад: 🔙 Назад)",
         "qr_prompt": "📷 Отправьте одно из следующего:\n• Текст или ссылку\n• Изображение 🖼\n• Аудио/голос 🎵\n\n(Назад: 🔙 Назад)",
         "qr_uploading": "⏳ Загрузка файла...",
         "qr_success": "✅ QR код готов!",
@@ -85,11 +98,17 @@ TEXTS = {
             "Ты бот AI Javobchi, созданный https://t.me/toshpolatov12. "
             "Пользователь может спрашивать только о боте. "
             "Что умеет бот: AI чат, создание QR кода, создание PDF. "
-            "На другие вопросы отвечай: 'На главной странице вы можете узнать только о боте. "
-            "Нажмите кнопку AI Assistant!' Говори по-русски."
+            "На другие вопросы: 'На главной странице только о боте. Нажмите AI Assistant!' Говори по-русски."
         ),
     },
     "en": {
+        "subscribe_msg": (
+            "⚠️ You need to subscribe to our channel to use this bot!\n\n"
+            "👇 Click the button below to subscribe:"
+        ),
+        "subscribe_check": "✅ I subscribed",
+        "subscribe_error": "❌ You haven't subscribed yet!\n\nPlease subscribe to the channel first 👇",
+        "subscribe_success": "✅ Subscription confirmed! You can use the bot now.",
         "welcome": (
             "👋 Hello! I'm AI Javobchi bot!\n\n"
             "📌 Choose one of the buttons below.\n\n"
@@ -99,9 +118,8 @@ TEXTS = {
         "qr_btn": "📷 QR Code Creator",
         "pdf_btn": "📄 PDF Generator",
         "back_btn": "🔙 Back",
-        "main_info": "ℹ️ On this page you can only learn about the bot.\n\nAsk a question about the bot!",
-        "ai_welcome": "🤖 AI Assistant activated!\nAsk me anything.\n\n(Back: 🔙 Back)",
         "thinking": "🤔 Thinking...",
+        "ai_welcome": "🤖 AI Assistant activated!\nAsk me anything.\n\n(Back: 🔙 Back)",
         "qr_prompt": "📷 Send one of the following:\n• Text or link\n• Image 🖼\n• Audio/voice 🎵\n\n(Back: 🔙 Back)",
         "qr_uploading": "⏳ Uploading file...",
         "qr_success": "✅ QR code ready!",
@@ -114,12 +132,26 @@ TEXTS = {
         "bot_system": (
             "You are AI Javobchi bot, created by https://t.me/toshpolatov12. "
             "User can only ask about the bot. "
-            "Bot features: AI chat, QR code creation, PDF creation. "
-            "For other questions say: 'On the main page you can only learn about the bot. "
-            "Press AI Assistant button!' Speak in English."
+            "Bot features: AI chat, QR code, PDF. "
+            "For other questions: 'On main page you can only learn about the bot. Press AI Assistant!' Speak English."
         ),
     }
 }
+
+# === OBUNA TEKSHIRISH ===
+async def check_subscription(user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id=CHANNEL, user_id=user_id)
+        return member.status not in ["left", "kicked", "banned"]
+    except Exception as e:
+        logging.error(f"Obuna tekshirish xatosi: {e}")
+        return False
+
+def get_subscribe_keyboard(lang: str):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Kanalga o'tish / Перейти / Go to channel", url=f"https://t.me/{CHANNEL_USERNAME}" if False else "https://t.me/uzinnotech")],
+        [InlineKeyboardButton(text=TEXTS[lang]["subscribe_check"], callback_data=f"check_sub_{lang}")]
+    ])
 
 def get_language_keyboard():
     return ReplyKeyboardMarkup(
@@ -192,9 +224,31 @@ async def language_selected(message: Message, state: FSMContext):
     else:
         await message.answer("Iltimos, tilni tanlang:", reply_markup=get_language_keyboard())
         return
+
     await state.update_data(language=lang)
+
+    # Obuna tekshirish
+    is_subscribed = await check_subscription(message.from_user.id)
+    if not is_subscribed:
+        await message.answer(TEXTS[lang]["subscribe_msg"], reply_markup=get_subscribe_keyboard(lang))
+        return
+
     await state.set_state(UserState.main_menu)
     await message.answer(TEXTS[lang]["welcome"], reply_markup=get_main_keyboard(lang))
+
+# === OBUNA TEKSHIRISH CALLBACK ===
+@dp.callback_query(F.data.startswith("check_sub_"))
+async def check_sub_callback(callback: CallbackQuery, state: FSMContext):
+    lang = callback.data.split("_")[-1]
+    is_subscribed = await check_subscription(callback.from_user.id)
+
+    if is_subscribed:
+        await state.update_data(language=lang)
+        await state.set_state(UserState.main_menu)
+        await callback.message.answer(TEXTS[lang]["subscribe_success"], reply_markup=get_main_keyboard(lang))
+        await callback.answer("✅")
+    else:
+        await callback.answer(TEXTS[lang]["subscribe_error"], show_alert=True)
 
 # === ORQAGA ===
 @dp.message(F.text.in_(["🔙 Orqaga", "🔙 Назад", "🔙 Back"]))
@@ -205,14 +259,14 @@ async def go_back(message: Message, state: FSMContext):
     await message.answer(TEXTS[lang]["welcome"], reply_markup=get_main_keyboard(lang))
 
 # === AI TUGMASI ===
-@dp.message(F.text.in_(["🤖 AI Assistant"]))
+@dp.message(F.text == "🤖 AI Assistant")
 async def ai_start(message: Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get("language", "uz")
     await state.set_state(UserState.ai_chat)
     await message.answer(TEXTS[lang]["ai_welcome"], reply_markup=get_back_keyboard(lang))
 
-# === QR KOD TUGMASI ===
+# === QR TUGMASI ===
 @dp.message(F.text.in_(["📷 QR Kod yaratuvchi", "📷 QR Код генератор", "📷 QR Code Creator"]))
 async def qr_start(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -228,7 +282,7 @@ async def pdf_start(message: Message, state: FSMContext):
     await state.set_state(UserState.pdf_waiting)
     await message.answer(TEXTS[lang]["pdf_prompt"], reply_markup=get_back_keyboard(lang))
 
-# === BOSH SAHIFA - BOT HAQIDA SAVOL ===
+# === BOSH SAHIFA ===
 @dp.message(UserState.main_menu)
 async def main_menu_handler(message: Message, state: FSMContext):
     text = message.text or ""
@@ -236,7 +290,6 @@ async def main_menu_handler(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     lang = data.get("language", "uz")
-
     wait_msg = await message.answer(TEXTS[lang]["thinking"])
     try:
         url = "https://api.groq.com/openai/v1/chat/completions"
@@ -253,14 +306,13 @@ async def main_menu_handler(message: Message, state: FSMContext):
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
                 if response.status == 200:
-                    data2 = await response.json()
-                    reply = data2["choices"][0]["message"]["content"]
+                    d = await response.json()
+                    reply = d["choices"][0]["message"]["content"]
                 else:
                     reply = TEXTS[lang]["qr_error"]
     except Exception as e:
         logging.error(f"Groq xatosi: {e}")
         reply = TEXTS[lang]["qr_error"]
-
     try:
         await wait_msg.delete()
     except:
@@ -275,7 +327,6 @@ async def ai_chat_handler(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     lang = data.get("language", "uz")
-
     if lang == "uz":
         system_msg = "Sen yordamchi AI assistantsan. O'zbek tilida aniq va tushunarli javob ber."
     elif lang == "ru":
@@ -299,19 +350,17 @@ async def ai_chat_handler(message: Message, state: FSMContext):
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
                 if response.status == 200:
-                    data2 = await response.json()
-                    reply = data2["choices"][0]["message"]["content"]
+                    d = await response.json()
+                    reply = d["choices"][0]["message"]["content"]
                 else:
                     reply = TEXTS[lang]["qr_error"]
     except Exception as e:
         logging.error(f"Groq xatosi: {e}")
         reply = TEXTS[lang]["qr_error"]
-
     try:
         await wait_msg.delete()
     except:
         pass
-
     if len(reply) > 4000:
         for i in range(0, len(reply), 4000):
             await message.answer(reply[i:i+4000])
@@ -375,7 +424,6 @@ async def qr_from_file(message: Message, state: FSMContext):
         else:
             file_id = message.document.file_id
             filename = message.document.file_name or "file"
-
         file = await bot.get_file(file_id)
         buf = io.BytesIO()
         await bot.download_file(file.file_path, buf)
@@ -404,34 +452,28 @@ async def generate_pdf(message: Message, state: FSMContext):
     if not text:
         await message.answer(TEXTS[lang]["pdf_prompt"])
         return
-
     wait_msg = await message.answer(TEXTS[lang]["pdf_processing"])
     try:
         pdf = FPDF()
         pdf.add_page()
         pdf.set_margins(20, 20, 20)
-
         font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
         if os.path.exists(font_path):
             pdf.add_font("DejaVu", "", font_path, uni=True)
             pdf.set_font("DejaVu", size=12)
         else:
             pdf.set_font("Helvetica", size=12)
-
         pdf.set_font_size(16)
         pdf.cell(0, 10, "Document", ln=True, align="C")
         pdf.ln(5)
         pdf.set_font_size(12)
         pdf.line(20, pdf.get_y(), 190, pdf.get_y())
         pdf.ln(8)
-
         for line in text.split("\n"):
             pdf.multi_cell(0, 8, line if line else " ")
-
         buf = io.BytesIO()
         pdf.output(buf)
         buf.seek(0)
-
         await wait_msg.delete()
         doc = BufferedInputFile(buf.read(), filename="document.pdf")
         await message.answer_document(doc, caption=TEXTS[lang]["pdf_success"])

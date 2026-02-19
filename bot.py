@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 import asyncio
 import aiohttp
 import os
@@ -15,6 +16,12 @@ from aiogram.fsm.storage.memory import MemoryStorage
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 CHANNEL = "@uzinnotech"
+
+# ✅ Faqat admin ko'ra oladi
+ADMIN_ID = 7189342638
+
+# ✅ Foydalanuvchilar bazasi (xotira, bot qayta ishlaganda tozalanadi)
+users_db = {}
 
 logging.basicConfig(level=logging.INFO)
 
@@ -253,11 +260,49 @@ async def check_and_notify_subscription(message: Message, state: FSMContext) -> 
 # === /start ===
 @dp.message(Command("start"))
 async def start_handler(message: Message, state: FSMContext):
+    # ✅ Foydalanuvchini bazaga saqlash
+    user = message.from_user
+    users_db[user.id] = {
+        "name": user.full_name,
+        "username": f"@{user.username}" if user.username else "—",
+        "lang": "—",
+        "date": datetime.now().strftime("%d.%m.%Y %H:%M")
+    }
     await state.set_state(UserState.choosing_language)
     await message.answer(
         "👋 Assalomu aleykum! / Здравствуйте! / Hello!\n\n🌐 Tilni tanlang / Выберите язык / Choose language:",
         reply_markup=get_language_keyboard()
     )
+
+# === /stats — faqat admin ===
+@dp.message(Command("stats"))
+async def stats_handler(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    total = len(users_db)
+    if total == 0:
+        await message.answer("📊 Hali hech kim botdan foydalanmagan.")
+        return
+    # Til statistikasi
+    langs = {"uz": 0, "ru": 0, "en": 0, "—": 0}
+    for u in users_db.values():
+        l = u.get("lang", "—")
+        langs[l] = langs.get(l, 0) + 1
+    # Oxirgi 10 ta foydalanuvchi
+    last_users = list(users_db.items())[-10:]
+    last_text = ""
+    for uid, u in reversed(last_users):
+        last_text += f"\n👤 {u['name']} {u['username']} | {u['lang']} | {u['date']}"
+    text = (
+        f"📊 <b>Bot statistikasi</b>\n\n"
+        f"👥 Jami foydalanuvchilar: <b>{total}</b>\n\n"
+        f"🌐 Tillar:\n"
+        f"  🇺🇿 O'zbek: {langs.get('uz', 0)}\n"
+        f"  🇷🇺 Rus: {langs.get('ru', 0)}\n"
+        f"  🇬🇧 Ingliz: {langs.get('en', 0)}\n\n"
+        f"🕐 Oxirgi 10 ta foydalanuvchi:{last_text}"
+    )
+    await message.answer(text, parse_mode="HTML")
 
 # === TIL TANLASH ===
 @dp.message(UserState.choosing_language)
@@ -274,6 +319,10 @@ async def language_selected(message: Message, state: FSMContext):
         return
 
     await state.update_data(language=lang)
+
+    # ✅ Tanlangan tilni users_db ga saqlash
+    if message.from_user.id in users_db:
+        users_db[message.from_user.id]["lang"] = lang
 
     is_subscribed = await check_subscription(message.from_user.id)
     if not is_subscribed:

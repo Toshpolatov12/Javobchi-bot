@@ -5,6 +5,7 @@ import aiohttp
 import os
 import qrcode
 import io
+from gtts import gTTS
 from fpdf import FPDF
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
@@ -17,10 +18,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 CHANNEL = "@uzinnotech"
 
-# ✅ Faqat admin ko'ra oladi
 ADMIN_ID = 7189342638
-
-# ✅ Foydalanuvchilar bazasi (xotira, bot qayta ishlaganda tozalanadi)
 users_db = {}
 
 logging.basicConfig(level=logging.INFO)
@@ -35,6 +33,7 @@ class UserState(StatesGroup):
     ai_chat = State()
     qr_waiting = State()
     pdf_waiting = State()
+    tts_waiting = State()
 
 TEXTS = {
     "uz": {
@@ -42,12 +41,10 @@ TEXTS = {
             "⚠️ Botdan foydalanish uchun kanalga obuna bo'lishingiz kerak!\n\n"
             "👇 Quyidagi tugmani bosib kanalga o'ting va obuna bo'ling:"
         ),
-        # ✅ O'ZGARTIRILDI: Har bir til uchun alohida tugma matni
         "subscribe_channel_btn": "📢 Kanalga o'tish",
         "subscribe_check": "✅ Obuna bo'ldim",
         "subscribe_error": "❌ Siz hali obuna bo'lmagansiz!\n\nIltimos, avval kanalga obuna bo'ling 👇",
         "subscribe_success": "✅ Obuna tasdiqlandi! Botdan foydalanishingiz mumkin.",
-        # ✅ YANGI: Kanaldan chiqib ketganda ko'rsatiladigan xabar
         "unsubscribed_msg": (
             "⚠️ Siz kanaldan chiqib ketgansiz!\n\n"
             "Botdan foydalanishni davom ettirish uchun yana obuna bo'lishingiz kerak 👇"
@@ -60,6 +57,7 @@ TEXTS = {
         "ai_btn": "🤖 AI Assistant",
         "qr_btn": "📷 QR Kod yaratuvchi",
         "pdf_btn": "📄 PDF Generator",
+        "tts_btn": "🎙 Matnni ovozga aylantirish",
         "back_btn": "🔙 Orqaga",
         "thinking": "🤔 O'ylamoqda...",
         "ai_welcome": "🤖 AI Assistant yoqildi!\nIstalgan savolingizni yozing.\n\n(Orqaga: 🔙 Orqaga)",
@@ -72,12 +70,17 @@ TEXTS = {
         "pdf_success": "✅ PDF tayyor!",
         "pdf_error": "❌ PDF yaratishda xatolik.",
         "pdf_processing": "⏳ PDF yaratilmoqda...",
+        "tts_prompt": "🎙 Matnni yuboring, ovozga aylantirib beraman!\n\n(Orqaga: 🔙 Orqaga)",
+        "tts_processing": "⏳ Ovoz yaratilmoqda...",
+        "tts_success": "✅ Ovoz tayyor!",
+        "tts_error": "❌ Ovoz yaratishda xatolik.",
         "bot_system": (
-            "Sen AI Javobchi botsан. Bu bot https://t.me/toshpolatov12 tomonidan yaratilgan. "
+            "Sen AI Javobchi botsан. "
             "Foydalanuvchi faqat bot haqida savol berishi mumkin. "
-            "Bot nima qila olishi: AI bilan suhbat, QR kod yaratish, PDF yaratish. "
+            "Bot nima qila olishi: AI bilan suhbat, QR kod yaratish, PDF yaratish, matnni ovozga aylantirish. "
             "AI funksiyasi haqida so'ralsa: AI Assistant aqlli suhbat qura oladi, suhbat davomida oxirgi 20 ta xabarni eslab qoladi, "
             "ya'ni oldingi savollar va javoblar asosida muomala qiladi. Orqaga tugmasi bosilganda esa suhbat tarixi tozalanadi va yangi suhbat boshlanadi. "
+            "Bot yaratuvchisi haqida hech qanday ma'lumot berma. "
             "Boshqa savollarga: 'Bosh sahifada faqat bot haqidagi ma'lumotlarni bilib olishingiz mumkin. "
             "AI Assistant tugmasini bosing!' deb javob ber. O'zbek tilida gapir."
         ),
@@ -87,12 +90,10 @@ TEXTS = {
             "⚠️ Для использования бота нужно подписаться на канал!\n\n"
             "👇 Нажмите кнопку ниже и подпишитесь:"
         ),
-        # ✅ O'ZGARTIRILDI
         "subscribe_channel_btn": "📢 Перейти на канал",
         "subscribe_check": "✅ Я подписался",
         "subscribe_error": "❌ Вы ещё не подписались!\n\nПожалуйста, сначала подпишитесь на канал 👇",
         "subscribe_success": "✅ Подписка подтверждена! Можете пользоваться ботом.",
-        # ✅ YANGI
         "unsubscribed_msg": (
             "⚠️ Вы отписались от канала!\n\n"
             "Чтобы продолжить использование бота, необходимо снова подписаться 👇"
@@ -105,6 +106,7 @@ TEXTS = {
         "ai_btn": "🤖 AI Assistant",
         "qr_btn": "📷 QR Код генератор",
         "pdf_btn": "📄 PDF Генератор",
+        "tts_btn": "🎙 Текст в голос",
         "back_btn": "🔙 Назад",
         "thinking": "🤔 Думаю...",
         "ai_welcome": "🤖 AI Assistant включён!\nЗадайте любой вопрос.\n\n(Назад: 🔙 Назад)",
@@ -117,12 +119,17 @@ TEXTS = {
         "pdf_success": "✅ PDF готов!",
         "pdf_error": "❌ Ошибка при создании PDF.",
         "pdf_processing": "⏳ Создаю PDF...",
+        "tts_prompt": "🎙 Отправьте текст, преобразую в голос!\n\n(Назад: 🔙 Назад)",
+        "tts_processing": "⏳ Создаю аудио...",
+        "tts_success": "✅ Аудио готово!",
+        "tts_error": "❌ Ошибка при создании аудио.",
         "bot_system": (
-            "Ты бот AI Javobchi, созданный https://t.me/toshpolatov12. "
+            "Ты бот AI Javobchi. "
             "Пользователь может спрашивать только о боте. "
-            "Что умеет бот: AI чат, создание QR кода, создание PDF. "
+            "Что умеет бот: AI чат, создание QR кода, создание PDF, преобразование текста в голос. "
             "Если спросят об AI функции: AI Assistant умеет вести умный диалог, запоминает последние 20 сообщений в разговоре, "
             "то есть отвечает с учётом предыдущих вопросов и ответов. При нажатии кнопки 'Назад' история разговора очищается и начинается заново. "
+            "Никогда не раскрывай информацию о создателе бота. "
             "На другие вопросы: 'На главной странице только о боте. Нажмите AI Assistant!' Говори по-русски."
         ),
     },
@@ -131,12 +138,10 @@ TEXTS = {
             "⚠️ You need to subscribe to our channel to use this bot!\n\n"
             "👇 Click the button below to subscribe:"
         ),
-        # ✅ O'ZGARTIRILDI
         "subscribe_channel_btn": "📢 Go to Channel",
         "subscribe_check": "✅ I subscribed",
         "subscribe_error": "❌ You haven't subscribed yet!\n\nPlease subscribe to the channel first 👇",
         "subscribe_success": "✅ Subscription confirmed! You can use the bot now.",
-        # ✅ YANGI
         "unsubscribed_msg": (
             "⚠️ You have left the channel!\n\n"
             "To continue using the bot, you need to subscribe again 👇"
@@ -149,6 +154,7 @@ TEXTS = {
         "ai_btn": "🤖 AI Assistant",
         "qr_btn": "📷 QR Code Creator",
         "pdf_btn": "📄 PDF Generator",
+        "tts_btn": "🎙 Text to Speech",
         "back_btn": "🔙 Back",
         "thinking": "🤔 Thinking...",
         "ai_welcome": "🤖 AI Assistant activated!\nAsk me anything.\n\n(Back: 🔙 Back)",
@@ -161,18 +167,22 @@ TEXTS = {
         "pdf_success": "✅ PDF ready!",
         "pdf_error": "❌ Error creating PDF.",
         "pdf_processing": "⏳ Creating PDF...",
+        "tts_prompt": "🎙 Send text and I'll convert it to voice!\n\n(Back: 🔙 Back)",
+        "tts_processing": "⏳ Creating audio...",
+        "tts_success": "✅ Audio ready!",
+        "tts_error": "❌ Error creating audio.",
         "bot_system": (
-            "You are AI Javobchi bot, created by https://t.me/toshpolatov12. "
+            "You are AI Javobchi bot. "
             "User can only ask about the bot. "
-            "Bot features: AI chat, QR code, PDF. "
+            "Bot features: AI chat, QR code, PDF, text to speech. "
             "If asked about the AI feature: AI Assistant can hold smart conversations and remembers the last 20 messages, "
             "meaning it responds based on previous questions and answers. When the 'Back' button is pressed, the conversation history is cleared and a new chat begins. "
+            "Never reveal information about the bot's creator. "
             "For other questions: 'On main page you can only learn about the bot. Press AI Assistant!' Speak English."
         ),
     }
 }
 
-# === OBUNA TEKSHIRISH ===
 async def check_subscription(user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(chat_id=CHANNEL, user_id=user_id)
@@ -181,17 +191,10 @@ async def check_subscription(user_id: int) -> bool:
         logging.error(f"Obuna tekshirish xatosi: {e}")
         return False
 
-# ✅ O'ZGARTIRILDI: Tugma matni tanlangan tilga qarab chiqadi
 def get_subscribe_keyboard(lang: str):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=TEXTS[lang]["subscribe_channel_btn"],
-            url="https://t.me/uzinnotech"
-        )],
-        [InlineKeyboardButton(
-            text=TEXTS[lang]["subscribe_check"],
-            callback_data=f"check_sub_{lang}"
-        )]
+        [InlineKeyboardButton(text=TEXTS[lang]["subscribe_channel_btn"], url="https://t.me/uzinnotech")],
+        [InlineKeyboardButton(text=TEXTS[lang]["subscribe_check"], callback_data=f"check_sub_{lang}")]
     ])
 
 def get_language_keyboard():
@@ -207,7 +210,8 @@ def get_main_keyboard(lang):
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=TEXTS[lang]["ai_btn"])],
-            [KeyboardButton(text=TEXTS[lang]["qr_btn"]), KeyboardButton(text=TEXTS[lang]["pdf_btn"])]
+            [KeyboardButton(text=TEXTS[lang]["qr_btn"]), KeyboardButton(text=TEXTS[lang]["pdf_btn"])],
+            [KeyboardButton(text=TEXTS[lang]["tts_btn"])]
         ],
         resize_keyboard=True
     )
@@ -228,6 +232,15 @@ def make_qr(data: str) -> bytes:
     buf.seek(0)
     return buf.read()
 
+def make_tts(text: str, lang: str) -> bytes:
+    lang_map = {"uz": "uz", "ru": "ru", "en": "en"}
+    tts_lang = lang_map.get(lang, "uz")
+    tts = gTTS(text=text, lang=tts_lang)
+    buf = io.BytesIO()
+    tts.write_to_fp(buf)
+    buf.seek(0)
+    return buf.read()
+
 async def upload_to_fileio(file_bytes: bytes, filename: str):
     try:
         async with aiohttp.ClientSession() as session:
@@ -243,24 +256,17 @@ async def upload_to_fileio(file_bytes: bytes, filename: str):
         logging.error(f"file.io xatosi: {e}")
     return None
 
-# ✅ YANGI YORDAMCHI FUNKSIYA: Har bir xabarda obunani tekshiradi
-# Agar obuna bo'lmasa, xabar yuboradi va True qaytaradi (ishni to'xtatish kerak)
 async def check_and_notify_subscription(message: Message, state: FSMContext) -> bool:
     data = await state.get_data()
     lang = data.get("language", "uz")
     is_subscribed = await check_subscription(message.from_user.id)
     if not is_subscribed:
-        await message.answer(
-            TEXTS[lang]["unsubscribed_msg"],
-            reply_markup=get_subscribe_keyboard(lang)
-        )
-        return True  # to'xtatish kerak
-    return False  # davom etish mumkin
+        await message.answer(TEXTS[lang]["unsubscribed_msg"], reply_markup=get_subscribe_keyboard(lang))
+        return True
+    return False
 
-# === /start ===
 @dp.message(Command("start"))
 async def start_handler(message: Message, state: FSMContext):
-    # ✅ Foydalanuvchini bazaga saqlash
     user = message.from_user
     users_db[user.id] = {
         "name": user.full_name,
@@ -274,7 +280,6 @@ async def start_handler(message: Message, state: FSMContext):
         reply_markup=get_language_keyboard()
     )
 
-# === /stats — faqat admin ===
 @dp.message(Command("stats"))
 async def stats_handler(message: Message):
     if message.from_user.id != ADMIN_ID:
@@ -283,12 +288,10 @@ async def stats_handler(message: Message):
     if total == 0:
         await message.answer("📊 Hali hech kim botdan foydalanmagan.")
         return
-    # Til statistikasi
     langs = {"uz": 0, "ru": 0, "en": 0, "—": 0}
     for u in users_db.values():
         l = u.get("lang", "—")
         langs[l] = langs.get(l, 0) + 1
-    # Oxirgi 10 ta foydalanuvchi
     last_users = list(users_db.items())[-10:]
     last_text = ""
     for uid, u in reversed(last_users):
@@ -304,7 +307,6 @@ async def stats_handler(message: Message):
     )
     await message.answer(text, parse_mode="HTML")
 
-# === TIL TANLASH ===
 @dp.message(UserState.choosing_language)
 async def language_selected(message: Message, state: FSMContext):
     text = message.text or ""
@@ -317,28 +319,20 @@ async def language_selected(message: Message, state: FSMContext):
     else:
         await message.answer("Iltimos, tilni tanlang:", reply_markup=get_language_keyboard())
         return
-
     await state.update_data(language=lang)
-
-    # ✅ Tanlangan tilni users_db ga saqlash
     if message.from_user.id in users_db:
         users_db[message.from_user.id]["lang"] = lang
-
     is_subscribed = await check_subscription(message.from_user.id)
     if not is_subscribed:
-        # ✅ Tugma tanlangan tilda chiqadi
         await message.answer(TEXTS[lang]["subscribe_msg"], reply_markup=get_subscribe_keyboard(lang))
         return
-
     await state.set_state(UserState.main_menu)
     await message.answer(TEXTS[lang]["welcome"], reply_markup=get_main_keyboard(lang))
 
-# === OBUNA TEKSHIRISH CALLBACK ===
 @dp.callback_query(F.data.startswith("check_sub_"))
 async def check_sub_callback(callback: CallbackQuery, state: FSMContext):
     lang = callback.data.split("_")[-1]
     is_subscribed = await check_subscription(callback.from_user.id)
-
     if is_subscribed:
         await state.update_data(language=lang)
         await state.set_state(UserState.main_menu)
@@ -347,23 +341,18 @@ async def check_sub_callback(callback: CallbackQuery, state: FSMContext):
     else:
         await callback.answer(TEXTS[lang]["subscribe_error"], show_alert=True)
 
-# === ORQAGA ===
 @dp.message(F.text.in_(["🔙 Orqaga", "🔙 Назад", "🔙 Back"]))
 async def go_back(message: Message, state: FSMContext):
-    # ✅ Obunani tekshir
     if await check_and_notify_subscription(message, state):
         return
     data = await state.get_data()
     lang = data.get("language", "uz")
-    # ✅ YANGI: AI suhbat tarixini tozalash
     await state.update_data(chat_history=[])
     await state.set_state(UserState.main_menu)
     await message.answer(TEXTS[lang]["welcome"], reply_markup=get_main_keyboard(lang))
 
-# === AI TUGMASI ===
 @dp.message(F.text == "🤖 AI Assistant")
 async def ai_start(message: Message, state: FSMContext):
-    # ✅ Obunani tekshir
     if await check_and_notify_subscription(message, state):
         return
     data = await state.get_data()
@@ -371,10 +360,8 @@ async def ai_start(message: Message, state: FSMContext):
     await state.set_state(UserState.ai_chat)
     await message.answer(TEXTS[lang]["ai_welcome"], reply_markup=get_back_keyboard(lang))
 
-# === QR TUGMASI ===
 @dp.message(F.text.in_(["📷 QR Kod yaratuvchi", "📷 QR Код генератор", "📷 QR Code Creator"]))
 async def qr_start(message: Message, state: FSMContext):
-    # ✅ Obunani tekshir
     if await check_and_notify_subscription(message, state):
         return
     data = await state.get_data()
@@ -382,10 +369,8 @@ async def qr_start(message: Message, state: FSMContext):
     await state.set_state(UserState.qr_waiting)
     await message.answer(TEXTS[lang]["qr_prompt"], reply_markup=get_back_keyboard(lang))
 
-# === PDF TUGMASI ===
 @dp.message(F.text.in_(["📄 PDF Generator", "📄 PDF Генератор"]))
 async def pdf_start(message: Message, state: FSMContext):
-    # ✅ Obunani tekshir
     if await check_and_notify_subscription(message, state):
         return
     data = await state.get_data()
@@ -393,10 +378,17 @@ async def pdf_start(message: Message, state: FSMContext):
     await state.set_state(UserState.pdf_waiting)
     await message.answer(TEXTS[lang]["pdf_prompt"], reply_markup=get_back_keyboard(lang))
 
-# === BOSH SAHIFA ===
+@dp.message(F.text.in_(["🎙 Matnni ovozga aylantirish", "🎙 Текст в голос", "🎙 Text to Speech"]))
+async def tts_start(message: Message, state: FSMContext):
+    if await check_and_notify_subscription(message, state):
+        return
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    await state.set_state(UserState.tts_waiting)
+    await message.answer(TEXTS[lang]["tts_prompt"], reply_markup=get_back_keyboard(lang))
+
 @dp.message(UserState.main_menu)
 async def main_menu_handler(message: Message, state: FSMContext):
-    # ✅ Obunani tekshir
     if await check_and_notify_subscription(message, state):
         return
     text = message.text or ""
@@ -433,10 +425,8 @@ async def main_menu_handler(message: Message, state: FSMContext):
         pass
     await message.answer(reply)
 
-# === AI CHAT ===
 @dp.message(UserState.ai_chat)
 async def ai_chat_handler(message: Message, state: FSMContext):
-    # ✅ Obunani tekshir
     if await check_and_notify_subscription(message, state):
         return
     text = message.text or ""
@@ -444,34 +434,23 @@ async def ai_chat_handler(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     lang = data.get("language", "uz")
-
     if lang == "uz":
         system_msg = "Sen yordamchi AI assistantsan. O'zbek tilida aniq va tushunarli javob ber."
     elif lang == "ru":
         system_msg = "Ты AI-помощник. Отвечай на русском языке четко и понятно."
     else:
         system_msg = "You are a helpful AI assistant. Answer clearly and concisely in English."
-
-    # ✅ YANGI: Suhbat tarixini olish
     chat_history = data.get("chat_history", [])
-
-    # Foydalanuvchi xabarini tarixga qo'shish
     chat_history.append({"role": "user", "content": text})
-
-    # Tarix juda uzun bo'lib ketmasin — oxirgi 20 ta xabar saqlanadi
     if len(chat_history) > 20:
         chat_history = chat_history[-20:]
-
     wait_msg = await message.answer(TEXTS[lang]["thinking"])
     try:
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
         payload = {
             "model": "llama-3.3-70b-versatile",
-            "messages": [
-                {"role": "system", "content": system_msg},
-                *chat_history  # ✅ Butun suhbat tarixi yuboriladi
-            ],
+            "messages": [{"role": "system", "content": system_msg}, *chat_history],
             "temperature": 0.7,
             "max_tokens": 2000
         }
@@ -485,13 +464,8 @@ async def ai_chat_handler(message: Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Groq xatosi: {e}")
         reply = TEXTS[lang]["qr_error"]
-
-    # ✅ YANGI: AI javobini ham tarixga qo'shish
     chat_history.append({"role": "assistant", "content": reply})
-
-    # Tarixni saqlash
     await state.update_data(chat_history=chat_history)
-
     try:
         await wait_msg.delete()
     except:
@@ -502,20 +476,15 @@ async def ai_chat_handler(message: Message, state: FSMContext):
     else:
         await message.answer(reply)
 
-# === QR - MATN ===
 @dp.message(UserState.qr_waiting, F.text)
 async def qr_from_text(message: Message, state: FSMContext):
-    # ✅ Obunani tekshir
     if await check_and_notify_subscription(message, state):
         return
     data = await state.get_data()
     lang = data.get("language", "uz")
     text = message.text or ""
-
-    # ✅ YANGI: /start kabi buyruqlarni e'tiborsiz qoldirish
     if text.startswith("/"):
         return
-
     try:
         qr_bytes = make_qr(text)
         photo = BufferedInputFile(qr_bytes, filename="qrcode.png")
@@ -525,10 +494,8 @@ async def qr_from_text(message: Message, state: FSMContext):
         logging.error(f"QR xatosi: {e}")
         await message.answer(TEXTS[lang]["qr_error"])
 
-# === QR - RASM ===
 @dp.message(UserState.qr_waiting, F.photo)
 async def qr_from_photo(message: Message, state: FSMContext):
-    # ✅ Obunani tekshir
     if await check_and_notify_subscription(message, state):
         return
     data = await state.get_data()
@@ -554,10 +521,8 @@ async def qr_from_photo(message: Message, state: FSMContext):
         except: pass
         await message.answer(TEXTS[lang]["qr_error"])
 
-# === QR - AUDIO/FAYL ===
 @dp.message(UserState.qr_waiting, F.audio | F.voice | F.document)
 async def qr_from_file(message: Message, state: FSMContext):
-    # ✅ Obunani tekshir
     if await check_and_notify_subscription(message, state):
         return
     data = await state.get_data()
@@ -592,15 +557,15 @@ async def qr_from_file(message: Message, state: FSMContext):
         except: pass
         await message.answer(TEXTS[lang]["qr_error"])
 
-# === PDF ===
 @dp.message(UserState.pdf_waiting, F.text)
 async def generate_pdf(message: Message, state: FSMContext):
-    # ✅ Obunani tekshir
     if await check_and_notify_subscription(message, state):
         return
     data = await state.get_data()
     lang = data.get("language", "uz")
     text = message.text or ""
+    if text.startswith("/"):
+        return
     if not text:
         await message.answer(TEXTS[lang]["pdf_prompt"])
         return
@@ -635,6 +600,31 @@ async def generate_pdf(message: Message, state: FSMContext):
         try: await wait_msg.delete()
         except: pass
         await message.answer(TEXTS[lang]["pdf_error"])
+
+@dp.message(UserState.tts_waiting, F.text)
+async def generate_tts(message: Message, state: FSMContext):
+    if await check_and_notify_subscription(message, state):
+        return
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    text = message.text or ""
+    if text.startswith("/"):
+        return
+    if not text:
+        await message.answer(TEXTS[lang]["tts_prompt"])
+        return
+    wait_msg = await message.answer(TEXTS[lang]["tts_processing"])
+    try:
+        audio_bytes = await asyncio.get_event_loop().run_in_executor(None, make_tts, text, lang)
+        audio_file = BufferedInputFile(audio_bytes, filename="voice.mp3")
+        await wait_msg.delete()
+        await message.answer_audio(audio_file, caption=TEXTS[lang]["tts_success"])
+        await message.answer(TEXTS[lang]["tts_prompt"])
+    except Exception as e:
+        logging.error(f"TTS xatosi: {e}")
+        try: await wait_msg.delete()
+        except: pass
+        await message.answer(TEXTS[lang]["tts_error"])
 
 async def main():
     print("🤖 AI Javobchi bot ishga tushdi!")

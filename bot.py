@@ -35,9 +35,16 @@ TEXTS = {
             "⚠️ Botdan foydalanish uchun kanalga obuna bo'lishingiz kerak!\n\n"
             "👇 Quyidagi tugmani bosib kanalga o'ting va obuna bo'ling:"
         ),
+        # ✅ O'ZGARTIRILDI: Har bir til uchun alohida tugma matni
+        "subscribe_channel_btn": "📢 Kanalga o'tish",
         "subscribe_check": "✅ Obuna bo'ldim",
         "subscribe_error": "❌ Siz hali obuna bo'lmagansiz!\n\nIltimos, avval kanalga obuna bo'ling 👇",
         "subscribe_success": "✅ Obuna tasdiqlandi! Botdan foydalanishingiz mumkin.",
+        # ✅ YANGI: Kanaldan chiqib ketganda ko'rsatiladigan xabar
+        "unsubscribed_msg": (
+            "⚠️ Siz kanaldan chiqib ketgansiz!\n\n"
+            "Botdan foydalanishni davom ettirish uchun yana obuna bo'lishingiz kerak 👇"
+        ),
         "welcome": (
             "👋 Salom! Men AI Javobchi botman!\n\n"
             "📌 Quyidagi tugmalardan birini tanlang.\n\n"
@@ -71,9 +78,16 @@ TEXTS = {
             "⚠️ Для использования бота нужно подписаться на канал!\n\n"
             "👇 Нажмите кнопку ниже и подпишитесь:"
         ),
+        # ✅ O'ZGARTIRILDI
+        "subscribe_channel_btn": "📢 Перейти на канал",
         "subscribe_check": "✅ Я подписался",
         "subscribe_error": "❌ Вы ещё не подписались!\n\nПожалуйста, сначала подпишитесь на канал 👇",
         "subscribe_success": "✅ Подписка подтверждена! Можете пользоваться ботом.",
+        # ✅ YANGI
+        "unsubscribed_msg": (
+            "⚠️ Вы отписались от канала!\n\n"
+            "Чтобы продолжить использование бота, необходимо снова подписаться 👇"
+        ),
         "welcome": (
             "👋 Привет! Я AI Javobchi бот!\n\n"
             "📌 Выберите одну из кнопок ниже.\n\n"
@@ -106,9 +120,16 @@ TEXTS = {
             "⚠️ You need to subscribe to our channel to use this bot!\n\n"
             "👇 Click the button below to subscribe:"
         ),
+        # ✅ O'ZGARTIRILDI
+        "subscribe_channel_btn": "📢 Go to Channel",
         "subscribe_check": "✅ I subscribed",
         "subscribe_error": "❌ You haven't subscribed yet!\n\nPlease subscribe to the channel first 👇",
         "subscribe_success": "✅ Subscription confirmed! You can use the bot now.",
+        # ✅ YANGI
+        "unsubscribed_msg": (
+            "⚠️ You have left the channel!\n\n"
+            "To continue using the bot, you need to subscribe again 👇"
+        ),
         "welcome": (
             "👋 Hello! I'm AI Javobchi bot!\n\n"
             "📌 Choose one of the buttons below.\n\n"
@@ -147,10 +168,17 @@ async def check_subscription(user_id: int) -> bool:
         logging.error(f"Obuna tekshirish xatosi: {e}")
         return False
 
+# ✅ O'ZGARTIRILDI: Tugma matni tanlangan tilga qarab chiqadi
 def get_subscribe_keyboard(lang: str):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📢 Kanalga o'tish / Перейти / Go to channel", url=f"https://t.me/{CHANNEL_USERNAME}" if False else "https://t.me/uzinnotech")],
-        [InlineKeyboardButton(text=TEXTS[lang]["subscribe_check"], callback_data=f"check_sub_{lang}")]
+        [InlineKeyboardButton(
+            text=TEXTS[lang]["subscribe_channel_btn"],
+            url="https://t.me/uzinnotech"
+        )],
+        [InlineKeyboardButton(
+            text=TEXTS[lang]["subscribe_check"],
+            callback_data=f"check_sub_{lang}"
+        )]
     ])
 
 def get_language_keyboard():
@@ -202,6 +230,20 @@ async def upload_to_fileio(file_bytes: bytes, filename: str):
         logging.error(f"file.io xatosi: {e}")
     return None
 
+# ✅ YANGI YORDAMCHI FUNKSIYA: Har bir xabarda obunani tekshiradi
+# Agar obuna bo'lmasa, xabar yuboradi va True qaytaradi (ishni to'xtatish kerak)
+async def check_and_notify_subscription(message: Message, state: FSMContext) -> bool:
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    is_subscribed = await check_subscription(message.from_user.id)
+    if not is_subscribed:
+        await message.answer(
+            TEXTS[lang]["unsubscribed_msg"],
+            reply_markup=get_subscribe_keyboard(lang)
+        )
+        return True  # to'xtatish kerak
+    return False  # davom etish mumkin
+
 # === /start ===
 @dp.message(Command("start"))
 async def start_handler(message: Message, state: FSMContext):
@@ -227,9 +269,9 @@ async def language_selected(message: Message, state: FSMContext):
 
     await state.update_data(language=lang)
 
-    # Obuna tekshirish
     is_subscribed = await check_subscription(message.from_user.id)
     if not is_subscribed:
+        # ✅ Tugma tanlangan tilda chiqadi
         await message.answer(TEXTS[lang]["subscribe_msg"], reply_markup=get_subscribe_keyboard(lang))
         return
 
@@ -253,6 +295,9 @@ async def check_sub_callback(callback: CallbackQuery, state: FSMContext):
 # === ORQAGA ===
 @dp.message(F.text.in_(["🔙 Orqaga", "🔙 Назад", "🔙 Back"]))
 async def go_back(message: Message, state: FSMContext):
+    # ✅ Obunani tekshir
+    if await check_and_notify_subscription(message, state):
+        return
     data = await state.get_data()
     lang = data.get("language", "uz")
     await state.set_state(UserState.main_menu)
@@ -261,6 +306,9 @@ async def go_back(message: Message, state: FSMContext):
 # === AI TUGMASI ===
 @dp.message(F.text == "🤖 AI Assistant")
 async def ai_start(message: Message, state: FSMContext):
+    # ✅ Obunani tekshir
+    if await check_and_notify_subscription(message, state):
+        return
     data = await state.get_data()
     lang = data.get("language", "uz")
     await state.set_state(UserState.ai_chat)
@@ -269,6 +317,9 @@ async def ai_start(message: Message, state: FSMContext):
 # === QR TUGMASI ===
 @dp.message(F.text.in_(["📷 QR Kod yaratuvchi", "📷 QR Код генератор", "📷 QR Code Creator"]))
 async def qr_start(message: Message, state: FSMContext):
+    # ✅ Obunani tekshir
+    if await check_and_notify_subscription(message, state):
+        return
     data = await state.get_data()
     lang = data.get("language", "uz")
     await state.set_state(UserState.qr_waiting)
@@ -277,6 +328,9 @@ async def qr_start(message: Message, state: FSMContext):
 # === PDF TUGMASI ===
 @dp.message(F.text.in_(["📄 PDF Generator", "📄 PDF Генератор"]))
 async def pdf_start(message: Message, state: FSMContext):
+    # ✅ Obunani tekshir
+    if await check_and_notify_subscription(message, state):
+        return
     data = await state.get_data()
     lang = data.get("language", "uz")
     await state.set_state(UserState.pdf_waiting)
@@ -285,6 +339,9 @@ async def pdf_start(message: Message, state: FSMContext):
 # === BOSH SAHIFA ===
 @dp.message(UserState.main_menu)
 async def main_menu_handler(message: Message, state: FSMContext):
+    # ✅ Obunani tekshir
+    if await check_and_notify_subscription(message, state):
+        return
     text = message.text or ""
     if not text:
         return
@@ -322,6 +379,9 @@ async def main_menu_handler(message: Message, state: FSMContext):
 # === AI CHAT ===
 @dp.message(UserState.ai_chat)
 async def ai_chat_handler(message: Message, state: FSMContext):
+    # ✅ Obunani tekshir
+    if await check_and_notify_subscription(message, state):
+        return
     text = message.text or ""
     if not text:
         return
@@ -370,6 +430,9 @@ async def ai_chat_handler(message: Message, state: FSMContext):
 # === QR - MATN ===
 @dp.message(UserState.qr_waiting, F.text)
 async def qr_from_text(message: Message, state: FSMContext):
+    # ✅ Obunani tekshir
+    if await check_and_notify_subscription(message, state):
+        return
     data = await state.get_data()
     lang = data.get("language", "uz")
     text = message.text or ""
@@ -385,6 +448,9 @@ async def qr_from_text(message: Message, state: FSMContext):
 # === QR - RASM ===
 @dp.message(UserState.qr_waiting, F.photo)
 async def qr_from_photo(message: Message, state: FSMContext):
+    # ✅ Obunani tekshir
+    if await check_and_notify_subscription(message, state):
+        return
     data = await state.get_data()
     lang = data.get("language", "uz")
     wait_msg = await message.answer(TEXTS[lang]["qr_uploading"])
@@ -411,6 +477,9 @@ async def qr_from_photo(message: Message, state: FSMContext):
 # === QR - AUDIO/FAYL ===
 @dp.message(UserState.qr_waiting, F.audio | F.voice | F.document)
 async def qr_from_file(message: Message, state: FSMContext):
+    # ✅ Obunani tekshir
+    if await check_and_notify_subscription(message, state):
+        return
     data = await state.get_data()
     lang = data.get("language", "uz")
     wait_msg = await message.answer(TEXTS[lang]["qr_uploading"])
@@ -446,6 +515,9 @@ async def qr_from_file(message: Message, state: FSMContext):
 # === PDF ===
 @dp.message(UserState.pdf_waiting, F.text)
 async def generate_pdf(message: Message, state: FSMContext):
+    # ✅ Obunani tekshir
+    if await check_and_notify_subscription(message, state):
+        return
     data = await state.get_data()
     lang = data.get("language", "uz")
     text = message.text or ""

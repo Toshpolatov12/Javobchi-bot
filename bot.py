@@ -462,6 +462,11 @@ async def qr_from_text(message: Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get("language", "uz")
     text = message.text or ""
+
+    # ✅ YANGI: /start kabi buyruqlarni e'tiborsiz qoldirish
+    if text.startswith("/"):
+        return
+
     try:
         qr_bytes = make_qr(text)
         photo = BufferedInputFile(qr_bytes, filename="qrcode.png")

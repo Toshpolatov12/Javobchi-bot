@@ -85,7 +85,7 @@ TEXTS = {
         "back_btn": "🔙 Orqaga",
         "thinking": "🤔 O'ylamoqda...",
         "ai_welcome": "🤖 AI Assistant yoqildi!\nIstalgan savolingizni yozing.\n\n(Orqaga: 🔙 Orqaga)",
-        "qr_prompt": "📷 Quyidagilardan birini yuboring:\n• Matn yoki link\n• Rasm 🖼 (QR ichiga joylanadi)\n• Ovoz/audio 🎵\n\n(Orqaga: 🔙 Orqaga)",
+        "qr_prompt": "📷 Matn yoki link yuboring, QR kodga aylantirib beraman!\n\n(Orqaga: 🔙 Orqaga)",
         "qr_uploading": "⏳ Fayl yuklanmoqda...",
         "qr_success": "✅ QR kod tayyor!",
         "qr_error": "❌ Xatolik yuz berdi.",
@@ -133,7 +133,7 @@ TEXTS = {
         "back_btn": "🔙 Назад",
         "thinking": "🤔 Думаю...",
         "ai_welcome": "🤖 AI Assistant включён!\nЗадайте любой вопрос.\n\n(Назад: 🔙 Назад)",
-        "qr_prompt": "📷 Отправьте одно из следующего:\n• Текст или ссылку\n• Изображение 🖼 (будет в QR)\n• Аудио/голос 🎵\n\n(Назад: 🔙 Назад)",
+        "qr_prompt": "📷 Отправьте текст или ссылку, преобразую в QR код!\n\n(Назад: 🔙 Назад)",
         "qr_uploading": "⏳ Загрузка файла...",
         "qr_success": "✅ QR код готов!",
         "qr_error": "❌ Произошла ошибка.",
@@ -180,7 +180,7 @@ TEXTS = {
         "back_btn": "🔙 Back",
         "thinking": "🤔 Thinking...",
         "ai_welcome": "🤖 AI Assistant activated!\nAsk me anything.\n\n(Back: 🔙 Back)",
-        "qr_prompt": "📷 Send one of the following:\n• Text or link\n• Image 🖼 (will be in QR)\n• Audio/voice 🎵\n\n(Back: 🔙 Back)",
+        "qr_prompt": "📷 Send text or a link, I'll convert it to a QR code!\n\n(Back: 🔙 Back)",
         "qr_uploading": "⏳ Uploading file...",
         "qr_success": "✅ QR code ready!",
         "qr_error": "❌ An error occurred.",
@@ -547,49 +547,18 @@ async def qr_from_text(message: Message, state: FSMContext):
         logging.error(f"QR xatosi: {e}")
         await message.answer(TEXTS[lang]["qr_error"])
 
-# ✅ FIX #5: Rasm QR - base64 o'rniga file.io ga yuklash
 @dp.message(UserState.qr_waiting, F.photo)
 async def qr_from_photo(message: Message, state: FSMContext):
     if await check_and_notify_subscription(message, state):
         return
     data = await state.get_data()
     lang = data.get("language", "uz")
-    wait_msg = await message.answer(TEXTS[lang]["qr_uploading"])
-    try:
-        file = await bot.get_file(message.photo[-1].file_id)
-        buf = io.BytesIO()
-        await bot.download_file(file.file_path, buf)
-        buf.seek(0)
-        image_bytes = buf.read()
-
-        # Rasm hajmini tekshirish va siqish (file.io uchun ham)
-        size_kb = len(image_bytes) / 1024
-        if size_kb > 500:
-            img = Image.open(io.BytesIO(image_bytes))
-            img.thumbnail((800, 800), Image.Resampling.LANCZOS)
-            compressed_buf = io.BytesIO()
-            img.save(compressed_buf, format='JPEG', quality=70)
-            compressed_buf.seek(0)
-            image_bytes = compressed_buf.read()
-
-        # ✅ file.io ga yuklash (base64 emas)
-        link = await upload_to_fileio(image_bytes, "image.jpg")
-
-        await wait_msg.delete()
-        if link:
-            qr_bytes = make_qr(link)
-            photo_file = BufferedInputFile(qr_bytes, filename="qrcode.png")
-            await message.answer_photo(photo_file, caption=f"✅ QR kod tayyor!\n🔗 Rasm linki QR ichida")
-        else:
-            await message.answer(TEXTS[lang]["qr_error"])
-        await message.answer(TEXTS[lang]["qr_prompt"])
-    except Exception as e:
-        logging.error(f"Rasm QR xatosi: {e}")
-        try:
-            await wait_msg.delete()
-        except:
-            pass
-        await message.answer(TEXTS[lang]["qr_error"])
+    msgs = {
+        "uz": "⚠️ QR kod faqat matn va linklar uchun ishlaydi.\nIltimos, matn yoki link yuboring!",
+        "ru": "⚠️ QR код работает только для текста и ссылок.\nПожалуйста, отправьте текст или ссылку!",
+        "en": "⚠️ QR code only works for text and links.\nPlease send text or a link!"
+    }
+    await message.answer(msgs.get(lang, msgs["uz"]))
 
 @dp.message(UserState.qr_waiting, F.audio | F.voice | F.document)
 async def qr_from_file(message: Message, state: FSMContext):
@@ -597,39 +566,13 @@ async def qr_from_file(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     lang = data.get("language", "uz")
-    wait_msg = await message.answer(TEXTS[lang]["qr_uploading"])
-    try:
-        if message.audio:
-            file_id = message.audio.file_id
-            filename = message.audio.file_name or "audio.mp3"
-        elif message.voice:
-            file_id = message.voice.file_id
-            filename = "voice.ogg"
-        else:
-            file_id = message.document.file_id
-            filename = message.document.file_name or "file"
-        file = await bot.get_file(file_id)
-        buf = io.BytesIO()
-        await bot.download_file(file.file_path, buf)
-        buf.seek(0)
-        link = await upload_to_fileio(buf.read(), filename)
-        await wait_msg.delete()
-        if link:
-            qr_bytes = make_qr(link)
-            photo = BufferedInputFile(qr_bytes, filename="qrcode.png")
-            await message.answer_photo(photo, caption=f"✅ QR kod tayyor!\n🔗 Link: {link}")
-        else:
-            await message.answer(TEXTS[lang]["qr_error"])
-        await message.answer(TEXTS[lang]["qr_prompt"])
-    except Exception as e:
-        logging.error(f"Fayl QR xatosi: {e}")
-        try:
-            await wait_msg.delete()
-        except:
-            pass
-        await message.answer(TEXTS[lang]["qr_error"])
+    msgs = {
+        "uz": "⚠️ QR kod faqat matn va linklar uchun ishlaydi.\nIltimos, matn yoki link yuboring!",
+        "ru": "⚠️ QR код работает только для текста и ссылок.\nПожалуйста, отправьте текст или ссылку!",
+        "en": "⚠️ QR code only works for text and links.\nPlease send text or a link!"
+    }
+    await message.answer(msgs.get(lang, msgs["uz"]))
 
-# ✅ FIX #9: Font yo'q bo'lganda Unicode harflarni to'g'ri ko'rsatish
 @dp.message(UserState.pdf_waiting, F.text)
 async def generate_pdf(message: Message, state: FSMContext):
     if await check_and_notify_subscription(message, state):

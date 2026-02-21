@@ -255,8 +255,9 @@ def make_qr(data: str) -> bytes:
     return buf.read()
 
 def make_tts(text: str, lang: str) -> bytes:
-    lang_map = {"uz": "uz", "ru": "ru", "en": "en"}
-    tts_lang = lang_map.get(lang, "uz")
+    # gTTS "uz" ni qollab-quvvatlamaydi, shuning uchun "tr" ishlatamiz
+    lang_map = {"uz": "tr", "ru": "ru", "en": "en"}
+    tts_lang = lang_map.get(lang, "tr")
     tts = gTTS(text=text, lang=tts_lang)
     buf = io.BytesIO()
     tts.write_to_fp(buf)
@@ -264,6 +265,7 @@ def make_tts(text: str, lang: str) -> bytes:
     return buf.read()
 
 async def upload_to_fileio(file_bytes: bytes, filename: str):
+    # file.io ishlamasa, 0x0.st ga urinib korilamiz
     try:
         async with aiohttp.ClientSession() as session:
             form = aiohttp.FormData()
@@ -271,11 +273,25 @@ async def upload_to_fileio(file_bytes: bytes, filename: str):
             form.add_field("expires", "1d")
             async with session.post("https://file.io", data=form, timeout=aiohttp.ClientTimeout(total=60)) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
-                    if data.get("success"):
-                        return data.get("link")
+                    content_type = resp.headers.get("Content-Type", "")
+                    if "application/json" in content_type:
+                        data = await resp.json()
+                        if data.get("success"):
+                            return data.get("link")
     except Exception as e:
         logging.error(f"file.io xatosi: {e}")
+    # Backup: 0x0.st
+    try:
+        async with aiohttp.ClientSession() as session:
+            form = aiohttp.FormData()
+            form.add_field("file", file_bytes, filename=filename)
+            async with session.post("https://0x0.st", data=form, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                if resp.status == 200:
+                    link = (await resp.text()).strip()
+                    if link.startswith("http"):
+                        return link
+    except Exception as e:
+        logging.error(f"0x0.st xatosi: {e}")
     return None
 
 async def check_and_notify_subscription(message: Message, state: FSMContext) -> bool:

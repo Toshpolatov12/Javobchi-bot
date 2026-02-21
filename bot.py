@@ -1,4 +1,5 @@
 import logging
+import json
 from datetime import datetime
 import asyncio
 import aiohttp
@@ -20,8 +21,29 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 CHANNEL = "@uzinnotech"
 
-ADMIN_ID = 7189342638
-users_db = {}
+# ✅ FIX #6: ADMIN_ID env dan olinadi
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "7189342638"))
+
+# ✅ FIX #1: JSON fayl orqali persistent storage
+DB_FILE = "users_db.json"
+
+def load_users_db():
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_users_db(db: dict):
+    try:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(db, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logging.error(f"DB saqlash xatosi: {e}")
+
+users_db = load_users_db()
 
 logging.basicConfig(level=logging.INFO)
 
@@ -76,7 +98,7 @@ TEXTS = {
         "tts_success": "✅ Ovoz tayyor!",
         "tts_error": "❌ Ovoz yaratishda xatolik.",
         "bot_system": (
-            "Sen AI Javobchi botsан. "
+            "Sen AI Javobchi botsаn. "
             "Foydalanuvchi faqat bot haqida savol berishi mumkin. "
             "Bot nima qila olishi: AI bilan suhbat, QR kod yaratish (rasm QR ichiga joylanadi), PDF yaratish, matnni ovozga aylantirish. "
             "AI funksiyasi haqida so'ralsa: AI Assistant aqlli suhbat qura oladi, suhbat davomida oxirgi 20 ta xabarni eslab qoladi, "
@@ -182,13 +204,14 @@ TEXTS = {
     }
 }
 
+# ✅ FIX #3: Obuna tekshiruvida xato bo'lsa True qaytaradi (bloklamaydi)
 async def check_subscription(user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(chat_id=CHANNEL, user_id=user_id)
         return member.status not in ["left", "kicked", "banned"]
     except Exception as e:
         logging.error(f"Obuna tekshirish xatosi: {e}")
-        return False
+        return True  # ✅ Xato bo'lsa, foydalanuvchini bloklamas
 
 def get_subscribe_keyboard(lang: str):
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -264,15 +287,25 @@ async def check_and_notify_subscription(message: Message, state: FSMContext) -> 
         return True
     return False
 
+# ✅ FIX #8: Uzun xabarni bo'lib yuborish helper funksiyasi
+async def send_long_message(message: Message, text: str):
+    if len(text) > 4000:
+        for i in range(0, len(text), 4000):
+            await message.answer(text[i:i+4000])
+    else:
+        await message.answer(text)
+
 @dp.message(Command("start"))
 async def start_handler(message: Message, state: FSMContext):
     user = message.from_user
-    users_db[user.id] = {
+    user_data = {
         "name": user.full_name,
         "username": f"@{user.username}" if user.username else "—",
         "lang": "—",
         "date": datetime.now().strftime("%d.%m.%Y %H:%M")
     }
+    users_db[str(user.id)] = user_data  # ✅ str key JSON uchun
+    save_users_db(users_db)             # ✅ Darhol saqlanadi
     await state.set_state(UserState.choosing_language)
     await message.answer(
         "👋 Assalomu aleykum! / Здравствуйте! / Hello!\n\n🌐 Tilni tanlang / Выберите язык / Choose language:",
@@ -319,8 +352,10 @@ async def language_selected(message: Message, state: FSMContext):
         await message.answer("Iltimos, tilni tanlang:", reply_markup=get_language_keyboard())
         return
     await state.update_data(language=lang)
-    if message.from_user.id in users_db:
-        users_db[message.from_user.id]["lang"] = lang
+    uid = str(message.from_user.id)
+    if uid in users_db:
+        users_db[uid]["lang"] = lang
+        save_users_db(users_db)  # ✅ Til yangilanishi saqlanadi
     is_subscribed = await check_subscription(message.from_user.id)
     if not is_subscribed:
         await message.answer(TEXTS[lang]["subscribe_msg"], reply_markup=get_subscribe_keyboard(lang))
@@ -340,8 +375,13 @@ async def check_sub_callback(callback: CallbackQuery, state: FSMContext):
     else:
         await callback.answer(TEXTS[lang]["subscribe_error"], show_alert=True)
 
+# ✅ FIX #7: Back handler faqat tegishli holatlarda ishlaydi
 @dp.message(F.text.in_(["🔙 Orqaga", "🔙 Назад", "🔙 Back"]))
 async def go_back(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    # Agar til tanlash holatida bo'lsa, orqaga borishni e'tiborsiz qoldiramiz
+    if current_state == UserState.choosing_language:
+        return
     if await check_and_notify_subscription(message, state):
         return
     data = await state.get_data()
@@ -368,6 +408,7 @@ async def qr_start(message: Message, state: FSMContext):
     await state.set_state(UserState.qr_waiting)
     await message.answer(TEXTS[lang]["qr_prompt"], reply_markup=get_back_keyboard(lang))
 
+# ✅ FIX #2: PDF handler barcha 3 tildagi tugmani qamrab oladi
 @dp.message(F.text.in_(["📄 PDF Generator", "📄 PDF Генератор"]))
 async def pdf_start(message: Message, state: FSMContext):
     if await check_and_notify_subscription(message, state):
@@ -422,7 +463,8 @@ async def main_menu_handler(message: Message, state: FSMContext):
         await wait_msg.delete()
     except:
         pass
-    await message.answer(reply)
+    # ✅ FIX #8: main_menu_handler da ham uzun xabar bo'lib yuboriladi
+    await send_long_message(message, reply)
 
 @dp.message(UserState.ai_chat)
 async def ai_chat_handler(message: Message, state: FSMContext):
@@ -469,11 +511,7 @@ async def ai_chat_handler(message: Message, state: FSMContext):
         await wait_msg.delete()
     except:
         pass
-    if len(reply) > 4000:
-        for i in range(0, len(reply), 4000):
-            await message.answer(reply[i:i+4000])
-    else:
-        await message.answer(reply)
+    await send_long_message(message, reply)
 
 @dp.message(UserState.qr_waiting, F.text)
 async def qr_from_text(message: Message, state: FSMContext):
@@ -493,6 +531,7 @@ async def qr_from_text(message: Message, state: FSMContext):
         logging.error(f"QR xatosi: {e}")
         await message.answer(TEXTS[lang]["qr_error"])
 
+# ✅ FIX #5: Rasm QR - base64 o'rniga file.io ga yuklash
 @dp.message(UserState.qr_waiting, F.photo)
 async def qr_from_photo(message: Message, state: FSMContext):
     if await check_and_notify_subscription(message, state):
@@ -506,38 +545,33 @@ async def qr_from_photo(message: Message, state: FSMContext):
         await bot.download_file(file.file_path, buf)
         buf.seek(0)
         image_bytes = buf.read()
-        
-        # Rasm hajmini tekshirish va siqish
+
+        # Rasm hajmini tekshirish va siqish (file.io uchun ham)
         size_kb = len(image_bytes) / 1024
-        
-        if size_kb > 100:
+        if size_kb > 500:
             img = Image.open(io.BytesIO(image_bytes))
-            img.thumbnail((400, 400), Image.Resampling.LANCZOS)
+            img.thumbnail((800, 800), Image.Resampling.LANCZOS)
             compressed_buf = io.BytesIO()
-            img.save(compressed_buf, format='JPEG', quality=50)
+            img.save(compressed_buf, format='JPEG', quality=70)
             compressed_buf.seek(0)
             image_bytes = compressed_buf.read()
-            size_kb = len(image_bytes) / 1024
-        
-        # Base64 ga aylantirish
-        base64_str = base64.b64encode(image_bytes).decode('utf-8')
-        data_url = f"data:image/jpeg;base64,{base64_str}"
-        
-        # QR yaratish
-        qr_bytes = make_qr(data_url)
-        
+
+        # ✅ file.io ga yuklash (base64 emas)
+        link = await upload_to_fileio(image_bytes, "image.jpg")
+
         await wait_msg.delete()
-        photo = BufferedInputFile(qr_bytes, filename="qrcode.png")
-        caption = f"✅ QR kod tayyor!\n📏 Rasm: {size_kb:.1f} KB"
-        if size_kb > 50:
-            caption += "\n⚠️ Rasm siqildi. Ba'zi telefonlar QR ni o'qiy olmasligi mumkin."
-        await message.answer_photo(photo, caption=caption)
+        if link:
+            qr_bytes = make_qr(link)
+            photo_file = BufferedInputFile(qr_bytes, filename="qrcode.png")
+            await message.answer_photo(photo_file, caption=f"✅ QR kod tayyor!\n🔗 Rasm linki QR ichida")
+        else:
+            await message.answer(TEXTS[lang]["qr_error"])
         await message.answer(TEXTS[lang]["qr_prompt"])
     except Exception as e:
         logging.error(f"Rasm QR xatosi: {e}")
-        try: 
+        try:
             await wait_msg.delete()
-        except: 
+        except:
             pass
         await message.answer(TEXTS[lang]["qr_error"])
 
@@ -573,10 +607,13 @@ async def qr_from_file(message: Message, state: FSMContext):
         await message.answer(TEXTS[lang]["qr_prompt"])
     except Exception as e:
         logging.error(f"Fayl QR xatosi: {e}")
-        try: await wait_msg.delete()
-        except: pass
+        try:
+            await wait_msg.delete()
+        except:
+            pass
         await message.answer(TEXTS[lang]["qr_error"])
 
+# ✅ FIX #9: Font yo'q bo'lganda Unicode harflarni to'g'ri ko'rsatish
 @dp.message(UserState.pdf_waiting, F.text)
 async def generate_pdf(message: Message, state: FSMContext):
     if await check_and_notify_subscription(message, state):
@@ -594,12 +631,29 @@ async def generate_pdf(message: Message, state: FSMContext):
         pdf = FPDF()
         pdf.add_page()
         pdf.set_margins(20, 20, 20)
-        font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-        if os.path.exists(font_path):
-            pdf.add_font("DejaVu", "", font_path, uni=True)
-            pdf.set_font("DejaVu", size=12)
-        else:
+
+        # ✅ Unicode fontlarni qidirish (bir nechta yo'l)
+        font_paths = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        ]
+        font_loaded = False
+        for font_path in font_paths:
+            if os.path.exists(font_path):
+                pdf.add_font("UniFont", "", font_path, uni=True)
+                pdf.set_font("UniFont", size=12)
+                font_loaded = True
+                break
+
+        if not font_loaded:
+            # ✅ Unicode font yo'q bo'lsa, harflarni ASCII ga o'girish
+            import unicodedata
+            def to_ascii(s):
+                return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
+            text = to_ascii(text)
             pdf.set_font("Helvetica", size=12)
+
         pdf.set_font_size(16)
         pdf.cell(0, 10, "Document", ln=True, align="C")
         pdf.ln(5)
@@ -617,10 +671,13 @@ async def generate_pdf(message: Message, state: FSMContext):
         await message.answer(TEXTS[lang]["pdf_prompt"])
     except Exception as e:
         logging.error(f"PDF xatosi: {e}")
-        try: await wait_msg.delete()
-        except: pass
+        try:
+            await wait_msg.delete()
+        except:
+            pass
         await message.answer(TEXTS[lang]["pdf_error"])
 
+# ✅ FIX #4: asyncio.get_event_loop() o'rniga asyncio.get_running_loop()
 @dp.message(UserState.tts_waiting, F.text)
 async def generate_tts(message: Message, state: FSMContext):
     if await check_and_notify_subscription(message, state):
@@ -635,15 +692,17 @@ async def generate_tts(message: Message, state: FSMContext):
         return
     wait_msg = await message.answer(TEXTS[lang]["tts_processing"])
     try:
-        audio_bytes = await asyncio.get_event_loop().run_in_executor(None, make_tts, text, lang)
+        audio_bytes = await asyncio.get_running_loop().run_in_executor(None, make_tts, text, lang)
         audio_file = BufferedInputFile(audio_bytes, filename="voice.mp3")
         await wait_msg.delete()
         await message.answer_audio(audio_file, caption=TEXTS[lang]["tts_success"])
         await message.answer(TEXTS[lang]["tts_prompt"])
     except Exception as e:
         logging.error(f"TTS xatosi: {e}")
-        try: await wait_msg.delete()
-        except: pass
+        try:
+            await wait_msg.delete()
+        except:
+            pass
         await message.answer(TEXTS[lang]["tts_error"])
 
 async def main():

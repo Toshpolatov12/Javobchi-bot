@@ -2,19 +2,19 @@ import logging
 from datetime import datetime
 import asyncio
 import aiohttp
-
+import base64
 import os
 import qrcode
 import io
 from gtts import gTTS
 from fpdf import FPDF
+from PIL import Image
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
@@ -63,10 +63,9 @@ TEXTS = {
         "back_btn": "🔙 Orqaga",
         "thinking": "🤔 O'ylamoqda...",
         "ai_welcome": "🤖 AI Assistant yoqildi!\nIstalgan savolingizni yozing.\n\n(Orqaga: 🔙 Orqaga)",
-        "qr_prompt": "📷 Quyidagilardan birini yuboring:\n• Matn yoki link\n• Rasm 🖼\n• Ovoz/audio 🎵\n\n(Orqaga: 🔙 Orqaga)",
+        "qr_prompt": "📷 Quyidagilardan birini yuboring:\n• Matn yoki link\n• Rasm 🖼 (QR ichiga joylanadi)\n• Ovoz/audio 🎵\n\n(Orqaga: 🔙 Orqaga)",
         "qr_uploading": "⏳ Fayl yuklanmoqda...",
         "qr_success": "✅ QR kod tayyor!",
-        "qr_file_success": "✅ Fayl yuklandi va QR kod tayyor!\n🔗 Link:",
         "qr_error": "❌ Xatolik yuz berdi.",
         "pdf_prompt": "📄 Matningizni yuboring, PDF ga aylantirib beraman!\n\n(Orqaga: 🔙 Orqaga)",
         "pdf_success": "✅ PDF tayyor!",
@@ -79,7 +78,7 @@ TEXTS = {
         "bot_system": (
             "Sen AI Javobchi botsан. "
             "Foydalanuvchi faqat bot haqida savol berishi mumkin. "
-            "Bot nima qila olishi: AI bilan suhbat, QR kod yaratish, PDF yaratish, matnni ovozga aylantirish. "
+            "Bot nima qila olishi: AI bilan suhbat, QR kod yaratish (rasm QR ichiga joylanadi), PDF yaratish, matnni ovozga aylantirish. "
             "AI funksiyasi haqida so'ralsa: AI Assistant aqlli suhbat qura oladi, suhbat davomida oxirgi 20 ta xabarni eslab qoladi, "
             "ya'ni oldingi savollar va javoblar asosida muomala qiladi. Orqaga tugmasi bosilganda esa suhbat tarixi tozalanadi va yangi suhbat boshlanadi. "
             "Bot yaratuvchisi haqida hech qanday ma'lumot berma. "
@@ -112,10 +111,9 @@ TEXTS = {
         "back_btn": "🔙 Назад",
         "thinking": "🤔 Думаю...",
         "ai_welcome": "🤖 AI Assistant включён!\nЗадайте любой вопрос.\n\n(Назад: 🔙 Назад)",
-        "qr_prompt": "📷 Отправьте одно из следующего:\n• Текст или ссылку\n• Изображение 🖼\n• Аудио/голос 🎵\n\n(Назад: 🔙 Назад)",
+        "qr_prompt": "📷 Отправьте одно из следующего:\n• Текст или ссылку\n• Изображение 🖼 (будет в QR)\n• Аудио/голос 🎵\n\n(Назад: 🔙 Назад)",
         "qr_uploading": "⏳ Загрузка файла...",
         "qr_success": "✅ QR код готов!",
-        "qr_file_success": "✅ Файл загружен, QR готов!\n🔗 Ссылка:",
         "qr_error": "❌ Произошла ошибка.",
         "pdf_prompt": "📄 Отправьте текст, преобразую в PDF!\n\n(Назад: 🔙 Назад)",
         "pdf_success": "✅ PDF готов!",
@@ -128,7 +126,7 @@ TEXTS = {
         "bot_system": (
             "Ты бот AI Javobchi. "
             "Пользователь может спрашивать только о боте. "
-            "Что умеет бот: AI чат, создание QR кода, создание PDF, преобразование текста в голос. "
+            "Что умеет бот: AI чат, создание QR кода (изображение помещается в QR), создание PDF, преобразование текста в голос. "
             "Если спросят об AI функции: AI Assistant умеет вести умный диалог, запоминает последние 20 сообщений в разговоре, "
             "то есть отвечает с учётом предыдущих вопросов и ответов. При нажатии кнопки 'Назад' история разговора очищается и начинается заново. "
             "Никогда не раскрывай информацию о создателе бота. "
@@ -160,10 +158,9 @@ TEXTS = {
         "back_btn": "🔙 Back",
         "thinking": "🤔 Thinking...",
         "ai_welcome": "🤖 AI Assistant activated!\nAsk me anything.\n\n(Back: 🔙 Back)",
-        "qr_prompt": "📷 Send one of the following:\n• Text or link\n• Image 🖼\n• Audio/voice 🎵\n\n(Back: 🔙 Back)",
+        "qr_prompt": "📷 Send one of the following:\n• Text or link\n• Image 🖼 (will be in QR)\n• Audio/voice 🎵\n\n(Back: 🔙 Back)",
         "qr_uploading": "⏳ Uploading file...",
         "qr_success": "✅ QR code ready!",
-        "qr_file_success": "✅ File uploaded, QR ready!\n🔗 Link:",
         "qr_error": "❌ An error occurred.",
         "pdf_prompt": "📄 Send text and I'll convert it to PDF!\n\n(Back: 🔙 Back)",
         "pdf_success": "✅ PDF ready!",
@@ -176,7 +173,7 @@ TEXTS = {
         "bot_system": (
             "You are AI Javobchi bot. "
             "User can only ask about the bot. "
-            "Bot features: AI chat, QR code, PDF, text to speech. "
+            "Bot features: AI chat, QR code (image embedded in QR), PDF, text to speech. "
             "If asked about the AI feature: AI Assistant can hold smart conversations and remembers the last 20 messages, "
             "meaning it responds based on previous questions and answers. When the 'Back' button is pressed, the conversation history is cleared and a new chat begins. "
             "Never reveal information about the bot's creator. "
@@ -508,19 +505,40 @@ async def qr_from_photo(message: Message, state: FSMContext):
         buf = io.BytesIO()
         await bot.download_file(file.file_path, buf)
         buf.seek(0)
-        link = await upload_to_fileio(buf.read(), "image.jpg")
+        image_bytes = buf.read()
+        
+        # Rasm hajmini tekshirish va siqish
+        size_kb = len(image_bytes) / 1024
+        
+        if size_kb > 100:
+            img = Image.open(io.BytesIO(image_bytes))
+            img.thumbnail((400, 400), Image.Resampling.LANCZOS)
+            compressed_buf = io.BytesIO()
+            img.save(compressed_buf, format='JPEG', quality=50)
+            compressed_buf.seek(0)
+            image_bytes = compressed_buf.read()
+            size_kb = len(image_bytes) / 1024
+        
+        # Base64 ga aylantirish
+        base64_str = base64.b64encode(image_bytes).decode('utf-8')
+        data_url = f"data:image/jpeg;base64,{base64_str}"
+        
+        # QR yaratish
+        qr_bytes = make_qr(data_url)
+        
         await wait_msg.delete()
-        if link:
-            qr_bytes = make_qr(link)
-            photo = BufferedInputFile(qr_bytes, filename="qrcode.png")
-            await message.answer_photo(photo, caption=f"{TEXTS[lang]['qr_file_success']}\n{link}")
-        else:
-            await message.answer(TEXTS[lang]["qr_error"])
+        photo = BufferedInputFile(qr_bytes, filename="qrcode.png")
+        caption = f"✅ QR kod tayyor!\n📏 Rasm: {size_kb:.1f} KB"
+        if size_kb > 50:
+            caption += "\n⚠️ Rasm siqildi. Ba'zi telefonlar QR ni o'qiy olmasligi mumkin."
+        await message.answer_photo(photo, caption=caption)
         await message.answer(TEXTS[lang]["qr_prompt"])
     except Exception as e:
         logging.error(f"Rasm QR xatosi: {e}")
-        try: await wait_msg.delete()
-        except: pass
+        try: 
+            await wait_msg.delete()
+        except: 
+            pass
         await message.answer(TEXTS[lang]["qr_error"])
 
 @dp.message(UserState.qr_waiting, F.audio | F.voice | F.document)
@@ -549,7 +567,7 @@ async def qr_from_file(message: Message, state: FSMContext):
         if link:
             qr_bytes = make_qr(link)
             photo = BufferedInputFile(qr_bytes, filename="qrcode.png")
-            await message.answer_photo(photo, caption=f"{TEXTS[lang]['qr_file_success']}\n{link}")
+            await message.answer_photo(photo, caption=f"✅ QR kod tayyor!\n🔗 Link: {link}")
         else:
             await message.answer(TEXTS[lang]["qr_error"])
         await message.answer(TEXTS[lang]["qr_prompt"])

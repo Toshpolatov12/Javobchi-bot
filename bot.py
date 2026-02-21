@@ -91,6 +91,10 @@ TEXTS = {
         "qr_error": "❌ Xatolik yuz berdi.",
         "pdf_prompt": "📄 Matningizni yuboring, PDF ga aylantirib beraman!\n\n(Orqaga: 🔙 Orqaga)",
         "pdf_success": "✅ PDF tayyor!",
+        "pdf_collecting": "📝 Ma'lumot qabul qilindi!\n\nYana ma'lumot yuboring yoki PDF yarating:",
+        "pdf_done_btn": "✅ Ha, PDF qil",
+        "pdf_more_btn": "➕ Hali tugamadi",
+        "pdf_cleared": "🗑 Oxirgi ma'lumot o'chirildi. Davom eting:",
         "pdf_error": "❌ PDF yaratishda xatolik.",
         "pdf_processing": "⏳ PDF yaratilmoqda...",
         "tts_prompt": "🎙 Matnni yuboring, ovozga aylantirib beraman!\n\n(Orqaga: 🔙 Orqaga)",
@@ -139,6 +143,10 @@ TEXTS = {
         "qr_error": "❌ Произошла ошибка.",
         "pdf_prompt": "📄 Отправьте текст, преобразую в PDF!\n\n(Назад: 🔙 Назад)",
         "pdf_success": "✅ PDF готов!",
+        "pdf_collecting": "📝 Данные получены!\n\nМожно добавить ещё или создать PDF:",
+        "pdf_done_btn": "✅ Да, создать PDF",
+        "pdf_more_btn": "➕ Ещё не всё",
+        "pdf_cleared": "🗑 Последние данные удалены. Продолжайте:",
         "pdf_error": "❌ Ошибка при создании PDF.",
         "pdf_processing": "⏳ Создаю PDF...",
         "tts_prompt": "🎙 Отправьте текст, преобразую в голос!\n\n(Назад: 🔙 Назад)",
@@ -186,6 +194,10 @@ TEXTS = {
         "qr_error": "❌ An error occurred.",
         "pdf_prompt": "📄 Send text and I'll convert it to PDF!\n\n(Back: 🔙 Back)",
         "pdf_success": "✅ PDF ready!",
+        "pdf_collecting": "📝 Data received!\n\nYou can add more or create PDF:",
+        "pdf_done_btn": "✅ Yes, create PDF",
+        "pdf_more_btn": "➕ Not done yet",
+        "pdf_cleared": "🗑 Last data removed. Continue:",
         "pdf_error": "❌ Error creating PDF.",
         "pdf_processing": "⏳ Creating PDF...",
         "tts_prompt": "🎙 Send text and I'll convert it to voice!\n\n(Back: 🔙 Back)",
@@ -585,13 +597,87 @@ async def generate_pdf(message: Message, state: FSMContext):
     if not text:
         await message.answer(TEXTS[lang]["pdf_prompt"])
         return
-    wait_msg = await message.answer(TEXTS[lang]["pdf_processing"])
+
+    collected = data.get("pdf_collected", [])
+    msg_ids = data.get("pdf_msg_ids", [])
+    collected.append(text)
+    msg_ids.append(message.message_id)
+    await state.update_data(pdf_collected=collected, pdf_msg_ids=msg_ids)
+
+    total_chars = sum(len(t) for t in collected)
+    info = TEXTS[lang]["pdf_collecting"] + f"\n\xf0\x9f\x93\x8a Jami: {len(collected)} qism, {total_chars} belgi"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=TEXTS[lang]["pdf_done_btn"], callback_data="pdf_create")],
+        [InlineKeyboardButton(text=TEXTS[lang]["pdf_more_btn"], callback_data="pdf_more")]
+    ])
+    prompt_msg = await message.answer(info, reply_markup=kb)
+    prompt_ids = data.get("pdf_prompt_ids", [])
+    prompt_ids.append(prompt_msg.message_id)
+    await state.update_data(pdf_prompt_ids=prompt_ids)
+
+
+@dp.callback_query(F.data == "pdf_more")
+async def pdf_more_handler(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    collected = data.get("pdf_collected", [])
+    msg_ids = data.get("pdf_msg_ids", [])
+    prompt_ids = data.get("pdf_prompt_ids", [])
+
+    if collected:
+        collected.pop()
+    if msg_ids:
+        last_msg_id = msg_ids.pop()
+        try:
+            await bot.delete_message(callback.message.chat.id, last_msg_id)
+        except:
+            pass
+    try:
+        await callback.message.delete()
+    except:
+        pass
+    if prompt_ids:
+        prompt_ids.pop()
+
+    await state.update_data(pdf_collected=collected, pdf_msg_ids=msg_ids, pdf_prompt_ids=prompt_ids)
+    await callback.answer()
+
+    total_chars = sum(len(t) for t in collected)
+    status = f" | {len(collected)} qism, {total_chars} belgi" if collected else ""
+    await callback.message.answer(TEXTS[lang]["pdf_cleared"] + status)
+
+
+@dp.callback_query(F.data == "pdf_create")
+async def pdf_create_handler(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    collected = data.get("pdf_collected", [])
+    prompt_ids = data.get("pdf_prompt_ids", [])
+
+    for pid in prompt_ids:
+        try:
+            await bot.delete_message(callback.message.chat.id, pid)
+        except:
+            pass
+    try:
+        await callback.message.delete()
+    except:
+        pass
+
+    if not collected:
+        await callback.answer("Matn yoq!")
+        return
+
+    await callback.answer()
+    full_text = "\n".join(collected)
+    wait_msg = await callback.message.answer(TEXTS[lang]["pdf_processing"])
+
     try:
         pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
         pdf.set_margins(20, 20, 20)
 
-        # ✅ Unicode fontlarni qidirish (bir nechta yo'l)
         font_paths = [
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/usr/share/fonts/dejavu/DejaVuSans.ttf",
@@ -606,11 +692,10 @@ async def generate_pdf(message: Message, state: FSMContext):
                 break
 
         if not font_loaded:
-            # ✅ Unicode font yo'q bo'lsa, harflarni ASCII ga o'girish
             import unicodedata
             def to_ascii(s):
-                return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
-            text = to_ascii(text)
+                return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+            full_text = to_ascii(full_text)
             pdf.set_font("Helvetica", size=12)
 
         pdf.set_font_size(16)
@@ -619,24 +704,122 @@ async def generate_pdf(message: Message, state: FSMContext):
         pdf.set_font_size(12)
         pdf.line(20, pdf.get_y(), 190, pdf.get_y())
         pdf.ln(8)
-        for line in text.split("\n"):
+
+        for line in full_text.split("\n"):
             pdf.multi_cell(0, 8, line if line else " ")
+
         buf = io.BytesIO()
         pdf.output(buf)
         buf.seek(0)
         await wait_msg.delete()
         doc = BufferedInputFile(buf.read(), filename="document.pdf")
-        await message.answer_document(doc, caption=TEXTS[lang]["pdf_success"])
-        await message.answer(TEXTS[lang]["pdf_prompt"])
+        await callback.message.answer_document(doc, caption=TEXTS[lang]["pdf_success"])
+        await state.update_data(pdf_collected=[], pdf_msg_ids=[], pdf_prompt_ids=[])
+        await callback.message.answer(TEXTS[lang]["pdf_prompt"])
+
     except Exception as e:
         logging.error(f"PDF xatosi: {e}")
         try:
             await wait_msg.delete()
         except:
             pass
-        await message.answer(TEXTS[lang]["pdf_error"])
+        await callback.message.answer(TEXTS[lang]["pdf_error"])
 
-# ✅ FIX #4: asyncio.get_event_loop() o'rniga asyncio.get_running_loop()
+    except:
+        pass
+    if prompt_ids:
+        prompt_ids.pop()
+
+    await state.update_data(pdf_collected=collected, pdf_msg_ids=msg_ids, pdf_prompt_ids=prompt_ids)
+    await callback.answer()
+
+    total_chars = sum(len(t) for t in collected)
+    status = f"\n📊 Jami: {len(collected)} qism, {total_chars} belgi" if collected else ""
+    await callback.message.answer(TEXTS[lang]["pdf_cleared"] + status)
+
+
+@dp.callback_query(F.data == "pdf_create")
+async def pdf_create_handler(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("language", "uz")
+    collected = data.get("pdf_collected", [])
+    prompt_ids = data.get("pdf_prompt_ids", [])
+
+    # Barcha prompt xabarlarini o'chiramiz
+    for pid in prompt_ids:
+        try:
+            await bot.delete_message(callback.message.chat.id, pid)
+        except:
+            pass
+    try:
+        await callback.message.delete()
+    except:
+        pass
+
+    if not collected:
+        await callback.answer("❌ Matn yo'q!")
+        return
+
+    await callback.answer()
+    full_text = "\n".join(collected)
+    wait_msg = await callback.message.answer(TEXTS[lang]["pdf_processing"])
+
+    try:
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+        pdf.set_margins(20, 20, 20)
+
+        font_paths = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        ]
+        font_loaded = False
+        for font_path in font_paths:
+            if os.path.exists(font_path):
+                pdf.add_font("UniFont", "", font_path, uni=True)
+                pdf.set_font("UniFont", size=12)
+                font_loaded = True
+                break
+
+        if not font_loaded:
+            import unicodedata
+            def to_ascii(s):
+                return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+            full_text = to_ascii(full_text)
+            pdf.set_font("Helvetica", size=12)
+
+        pdf.set_font_size(16)
+        pdf.cell(0, 10, "Document", ln=True, align="C")
+        pdf.ln(5)
+        pdf.set_font_size(12)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.ln(8)
+
+        for line in full_text.split("\n"):
+            pdf.multi_cell(0, 8, line if line else " ")
+
+        buf = io.BytesIO()
+        pdf.output(buf)
+        buf.seek(0)
+        await wait_msg.delete()
+
+        doc = BufferedInputFile(buf.read(), filename="document.pdf")
+        await callback.message.answer_document(doc, caption=TEXTS[lang]["pdf_success"])
+
+        # Stateni tozalaymiz
+        await state.update_data(pdf_collected=[], pdf_msg_ids=[], pdf_prompt_ids=[])
+        await callback.message.answer(TEXTS[lang]["pdf_prompt"])
+
+    except Exception as e:
+        logging.error(f"PDF xatosi: {e}")
+        try:
+            await wait_msg.delete()
+        except:
+            pass
+        await callback.message.answer(TEXTS[lang]["pdf_error"])
+
 @dp.message(UserState.tts_waiting, F.text)
 async def generate_tts(message: Message, state: FSMContext):
     if await check_and_notify_subscription(message, state):

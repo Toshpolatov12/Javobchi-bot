@@ -1,33 +1,43 @@
 import logging
 import json
-from datetime import datetime
 import asyncio
 import aiohttp
 import base64
 import os
-import qrcode
 import io
+import csv
+import codecs
+import unicodedata
+from datetime import datetime
+
+import qrcode
 from gtts import gTTS
 from fpdf import FPDF
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import (
+    Message, CallbackQuery,
+    ReplyKeyboardMarkup, KeyboardButton,
+    InlineKeyboardMarkup, InlineKeyboardButton,
+    BufferedInputFile
+)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-CHANNEL = "@uzinnotech"
+BOT_TOKEN      = os.environ.get("BOT_TOKEN", "")
+GROQ_API_KEY   = os.environ.get("GROQ_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+ADMIN_ID       = int(os.environ.get("ADMIN_ID", "7189342638"))
+CHANNEL        = "@uzinnotech"
+DB_FILE        = "users_db.json"
 
-# ✅ FIX #6: ADMIN_ID env dan olinadi
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "7189342638"))
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger(__name__)
 
-# ✅ FIX #1: JSON fayl orqali persistent storage
-DB_FILE = "users_db.json"
-
-def load_users_db():
+def db_load():
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
@@ -36,819 +46,783 @@ def load_users_db():
             return {}
     return {}
 
-def save_users_db(db: dict):
+def db_save(data):
     try:
         with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(db, f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        logging.error(f"DB saqlash xatosi: {e}")
+        log.error(f"DB save error: {e}")
 
-users_db = load_users_db()
+users_db = db_load()
+storage  = MemoryStorage()
+bot      = Bot(token=BOT_TOKEN)
+dp       = Dispatcher(storage=storage)
 
-logging.basicConfig(level=logging.INFO)
+class S(StatesGroup):
+    lang      = State()
+    menu      = State()
+    ai_chat   = State()
+    qr        = State()
+    pdf       = State()
+    tts       = State()
+    excel     = State()
+    wm_photo  = State()
+    wm_text   = State()
 
-storage = MemoryStorage()
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(storage=storage)
-
-class UserState(StatesGroup):
-    choosing_language = State()
-    main_menu = State()
-    ai_chat = State()
-    qr_waiting = State()
-    pdf_waiting = State()
-    tts_waiting = State()
-
-TEXTS = {
+T = {
     "uz": {
-        "subscribe_msg": (
-            "⚠️ Botdan foydalanish uchun kanalga obuna bo'lishingiz kerak!\n\n"
-            "👇 Quyidagi tugmani bosib kanalga o'ting va obuna bo'ling:"
-        ),
-        "subscribe_channel_btn": "📢 Kanalga o'tish",
-        "subscribe_check": "✅ Obuna bo'ldim",
-        "subscribe_error": "❌ Siz hali obuna bo'lmagansiz!\n\nIltimos, avval kanalga obuna bo'ling 👇",
-        "subscribe_success": "✅ Obuna tasdiqlandi! Botdan foydalanishingiz mumkin.",
-        "unsubscribed_msg": (
-            "⚠️ Siz kanaldan chiqib ketgansiz!\n\n"
-            "Botdan foydalanishni davom ettirish uchun yana obuna bo'lishingiz kerak 👇"
-        ),
-        "welcome": (
-            "👋 Salom! Men AI Javobchi botman!\n\n"
-            "📌 Quyidagi tugmalardan birini tanlang.\n\n"
-            "💡 Bot haqida savol bersangiz, javob beraman!"
-        ),
-        "ai_btn": "🤖 AI Assistant",
-        "qr_btn": "📷 QR Kod yaratuvchi",
-        "pdf_btn": "📄 PDF Generator",
-        "tts_btn": "🎙 Matnni ovozga aylantirish",
-        "back_btn": "🔙 Orqaga",
-        "thinking": "🤔 O'ylamoqda...",
-        "ai_welcome": "🤖 AI Assistant yoqildi!\nIstalgan savolingizni yozing.\n\n(Orqaga: 🔙 Orqaga)",
-        "qr_prompt": "📷 Matn yoki link yuboring, QR kodga aylantirib beraman!\n\n(Orqaga: 🔙 Orqaga)",
-        "qr_uploading": "⏳ Fayl yuklanmoqda...",
-        "qr_success": "✅ QR kod tayyor!",
-        "qr_error": "❌ Xatolik yuz berdi.",
-        "pdf_prompt": "📄 Matningizni yuboring, PDF ga aylantirib beraman!\n\n(Orqaga: 🔙 Orqaga)",
-        "pdf_success": "✅ PDF tayyor!",
-        "pdf_collecting": "📝 Ma'lumot qabul qilindi!\n\nYana ma'lumot yuboring yoki PDF yarating:",
-        "pdf_done_btn": "✅ Ha, PDF qil",
-        "pdf_more_btn": "➕ Hali tugamadi",
-        "pdf_cleared": "🗑 Oxirgi ma'lumot o'chirildi. Davom eting:",
-        "pdf_error": "❌ PDF yaratishda xatolik.",
-        "pdf_processing": "⏳ PDF yaratilmoqda...",
-        "tts_prompt": "🎙 Matnni yuboring, ovozga aylantirib beraman!\n\n(Orqaga: 🔙 Orqaga)",
-        "tts_processing": "⏳ Ovoz yaratilmoqda...",
-        "tts_success": "✅ Ovoz tayyor!",
-        "tts_error": "❌ Ovoz yaratishda xatolik.",
-        "bot_system": (
-            "Sen AI Javobchi botsаn. "
-            "Foydalanuvchi faqat bot haqida savol berishi mumkin. "
-            "Bot nima qila olishi: AI bilan suhbat, QR kod yaratish (rasm QR ichiga joylanadi), PDF yaratish, matnni ovozga aylantirish. "
-            "AI funksiyasi haqida so'ralsa: AI Assistant aqlli suhbat qura oladi, suhbat davomida oxirgi 20 ta xabarni eslab qoladi, "
-            "ya'ni oldingi savollar va javoblar asosida muomala qiladi. Orqaga tugmasi bosilganda esa suhbat tarixi tozalanadi va yangi suhbat boshlanadi. "
-            "Bot yaratuvchisi haqida hech qanday ma'lumot berma. "
-            "Boshqa savollarga: 'Bosh sahifada faqat bot haqidagi ma'lumotlarni bilib olishingiz mumkin. "
-            "AI Assistant tugmasini bosing!' deb javob ber. O'zbek tilida gapir."
-        ),
+        "sub_msg":      "\u26a0\ufe0f Botdan foydalanish uchun kanalga obuna bo'ling!\n\n\U0001f447 Quyidagi tugmani bosing:",
+        "sub_btn":      "\U0001f4e2 Kanalga o'tish",
+        "sub_check":    "\u2705 Obuna bo'ldim",
+        "sub_error":    "\u274c Siz hali obuna bo'lmagansiz! Iltimos, avval kanalga obuna bo'ling \U0001f447",
+        "sub_ok":       "\u2705 Obuna tasdiqlandi! Xush kelibsiz!",
+        "unsub_msg":    "\u26a0\ufe0f Siz kanaldan chiqib ketgansiz!\n\nDavom etish uchun qayta obuna bo'ling \U0001f447",
+        "welcome":      "\U0001f44b Salom, <b>{name}</b>!\n\n\U0001f916 Men <b>AI Javobchi</b> \u2014 aqlli ko'p funksiyali botman.\n\n\U0001f4cc Quyidagi bo'limlardan birini tanlang:",
+        "ai_btn":       "\U0001f916 AI Suhbat",
+        "qr_btn":       "\U0001f4f7 QR Kod",
+        "pdf_btn":      "\U0001f4c4 PDF",
+        "tts_btn":      "\U0001f399 Matndan Ovoz",
+        "excel_btn":    "\U0001f4ca Excel",
+        "wm_btn":       "\U0001f5bc Rasmga Matn",
+        "back_btn":     "\U0001f519 Orqaga",
+        "ai_welcome":   "\U0001f916 <b>AI Suhbat</b> rejimi!\n\n\U0001f4ac Matn, rasm yoki ovoz xabar yuboring.\n\U0001f4cc Orqaga: <b>\U0001f519 Orqaga</b>",
+        "ai_thinking":  "\u23f3 Fikrlamoqda...",
+        "ai_error":     "\u274c Xatolik yuz berdi. Qayta urinib ko'ring.",
+        "qr_welcome":   "\U0001f4f7 <b>QR Kod</b> generatori!\n\n\u270f\ufe0f Matn yoki link yuboring.\n\U0001f4cc Orqaga: <b>\U0001f519 Orqaga</b>",
+        "qr_success":   "\u2705 QR kod tayyor!",
+        "qr_error":     "\u274c QR yaratishda xatolik.",
+        "qr_only_text": "\u26a0\ufe0f Faqat <b>matn yoki link</b> yuboring.",
+        "pdf_welcome":  "\U0001f4c4 <b>PDF Generator</b>!\n\n\u270f\ufe0f Matn yuboring. Bir nechta qism yuborishingiz mumkin.\n\U0001f4cc Orqaga: <b>\U0001f519 Orqaga</b>",
+        "pdf_collect":  "\U0001f4dd Qabul qilindi! <b>{parts}</b> qism, <b>{chars}</b> belgi.\n\nDavom etasizmi?",
+        "pdf_done_btn": "\u2705 PDF yaratish",
+        "pdf_undo_btn": "\u21a9\ufe0f Oxirgini o'chirish",
+        "pdf_cleared":  "\u21a9\ufe0f Oxirgi qism o'chirildi.",
+        "pdf_empty":    "\u26a0\ufe0f Matn yo'q. Avval biror narsa yuboring.",
+        "pdf_process":  "\u23f3 PDF yaratilmoqda...",
+        "pdf_success":  "\u2705 PDF tayyor!",
+        "pdf_error":    "\u274c PDF yaratishda xatolik.",
+        "tts_welcome":  "\U0001f399 <b>Matndan Ovoz</b>!\n\n\u270f\ufe0f Matn yuboring.\n\U0001f4cc Orqaga: <b>\U0001f519 Orqaga</b>",
+        "tts_process":  "\u23f3 Ovoz yaratilmoqda...",
+        "tts_success":  "\u2705 Ovoz tayyor!",
+        "tts_error":    "\u274c Ovoz yaratishda xatolik.",
+        "excel_welcome":"\U0001f4ca <b>Excel Generator</b>!\n\nFormat:\n<code>Ism, Yosh, Shahar\nAli, 25, Toshkent</code>\n\n\U0001f4cc Orqaga: <b>\U0001f519 Orqaga</b>",
+        "excel_process":"\u23f3 Excel yaratilmoqda...",
+        "excel_success":"\u2705 Excel tayyor!",
+        "excel_error":  "\u274c Excel yaratishda xatolik.",
+        "wm_welcome":   "\U0001f5bc <b>Rasmga Matn</b>!\n\n\U0001f4f8 Avval rasm yuboring:",
+        "wm_got_photo": "\u2705 Rasm qabul qilindi!\n\n\u270f\ufe0f Endi <b>matnni</b> yuboring:",
+        "wm_process":   "\u23f3 Rasm tayyorlanmoqda...",
+        "wm_success":   "\u2705 Rasm tayyor!",
+        "wm_error":     "\u274c Xatolik yuz berdi.",
+        "wm_no_photo":  "\u26a0\ufe0f Avval rasm yuboring!",
+        "wm_only_photo":"\u26a0\ufe0f Faqat rasm yuboring.",
     },
     "ru": {
-        "subscribe_msg": (
-            "⚠️ Для использования бота нужно подписаться на канал!\n\n"
-            "👇 Нажмите кнопку ниже и подпишитесь:"
-        ),
-        "subscribe_channel_btn": "📢 Перейти на канал",
-        "subscribe_check": "✅ Я подписался",
-        "subscribe_error": "❌ Вы ещё не подписались!\n\nПожалуйста, сначала подпишитесь на канал 👇",
-        "subscribe_success": "✅ Подписка подтверждена! Можете пользоваться ботом.",
-        "unsubscribed_msg": (
-            "⚠️ Вы отписались от канала!\n\n"
-            "Чтобы продолжить использование бота, необходимо снова подписаться 👇"
-        ),
-        "welcome": (
-            "👋 Привет! Я AI Javobchi бот!\n\n"
-            "📌 Выберите одну из кнопок ниже.\n\n"
-            "💡 Можете задать вопрос о боте!"
-        ),
-        "ai_btn": "🤖 AI Assistant",
-        "qr_btn": "📷 QR Код генератор",
-        "pdf_btn": "📄 PDF Генератор",
-        "tts_btn": "🎙 Текст в голос",
-        "back_btn": "🔙 Назад",
-        "thinking": "🤔 Думаю...",
-        "ai_welcome": "🤖 AI Assistant включён!\nЗадайте любой вопрос.\n\n(Назад: 🔙 Назад)",
-        "qr_prompt": "📷 Отправьте текст или ссылку, преобразую в QR код!\n\n(Назад: 🔙 Назад)",
-        "qr_uploading": "⏳ Загрузка файла...",
-        "qr_success": "✅ QR код готов!",
-        "qr_error": "❌ Произошла ошибка.",
-        "pdf_prompt": "📄 Отправьте текст, преобразую в PDF!\n\n(Назад: 🔙 Назад)",
-        "pdf_success": "✅ PDF готов!",
-        "pdf_collecting": "📝 Данные получены!\n\nМожно добавить ещё или создать PDF:",
-        "pdf_done_btn": "✅ Да, создать PDF",
-        "pdf_more_btn": "➕ Ещё не всё",
-        "pdf_cleared": "🗑 Последние данные удалены. Продолжайте:",
-        "pdf_error": "❌ Ошибка при создании PDF.",
-        "pdf_processing": "⏳ Создаю PDF...",
-        "tts_prompt": "🎙 Отправьте текст, преобразую в голос!\n\n(Назад: 🔙 Назад)",
-        "tts_processing": "⏳ Создаю аудио...",
-        "tts_success": "✅ Аудио готово!",
-        "tts_error": "❌ Ошибка при создании аудио.",
-        "bot_system": (
-            "Ты бот AI Javobchi. "
-            "Пользователь может спрашивать только о боте. "
-            "Что умеет бот: AI чат, создание QR кода (изображение помещается в QR), создание PDF, преобразование текста в голос. "
-            "Если спросят об AI функции: AI Assistant умеет вести умный диалог, запоминает последние 20 сообщений в разговоре, "
-            "то есть отвечает с учётом предыдущих вопросов и ответов. При нажатии кнопки 'Назад' история разговора очищается и начинается заново. "
-            "Никогда не раскрывай информацию о создателе бота. "
-            "На другие вопросы: 'На главной странице только о боте. Нажмите AI Assistant!' Говори по-русски."
-        ),
+        "sub_msg":      "\u26a0\ufe0f \u0414\u043b\u044f \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u0438\u044f \u043f\u043e\u0434\u043f\u0438\u0448\u0438\u0442\u0435\u0441\u044c \u043d\u0430 \u043a\u0430\u043d\u0430\u043b!",
+        "sub_btn":      "\U0001f4e2 \u041f\u0435\u0440\u0435\u0439\u0442\u0438 \u043d\u0430 \u043a\u0430\u043d\u0430\u043b",
+        "sub_check":    "\u2705 \u042f \u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043b\u0441\u044f",
+        "sub_error":    "\u274c \u0412\u044b \u0435\u0449\u0451 \u043d\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043b\u0438\u0441\u044c!",
+        "sub_ok":       "\u2705 \u041f\u043e\u0434\u043f\u0438\u0441\u043a\u0430 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0430!",
+        "unsub_msg":    "\u26a0\ufe0f \u0412\u044b \u043e\u0442\u043f\u0438\u0441\u0430\u043b\u0438\u0441\u044c! \u041f\u043e\u0434\u043f\u0438\u0448\u0438\u0442\u0435\u0441\u044c \u0441\u043d\u043e\u0432\u0430.",
+        "welcome":      "\U0001f44b \u041f\u0440\u0438\u0432\u0435\u0442, <b>{name}</b>!\n\n\U0001f916 \u042f <b>AI Javobchi</b> \u2014 \u0443\u043c\u043d\u044b\u0439 \u043c\u043d\u043e\u0433\u043e\u0444\u0443\u043d\u043a\u0446\u0438\u043e\u043d\u0430\u043b\u044c\u043d\u044b\u0439 \u0431\u043e\u0442.\n\n\U0001f4cc \u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0440\u0430\u0437\u0434\u0435\u043b:",
+        "ai_btn":       "\U0001f916 AI \u0427\u0430\u0442",
+        "qr_btn":       "\U0001f4f7 QR \u041a\u043e\u0434",
+        "pdf_btn":      "\U0001f4c4 PDF",
+        "tts_btn":      "\U0001f399 \u0422\u0435\u043a\u0441\u0442 \u0432 \u0413\u043e\u043b\u043e\u0441",
+        "excel_btn":    "\U0001f4ca Excel",
+        "wm_btn":       "\U0001f5bc \u0422\u0435\u043a\u0441\u0442 \u043d\u0430 \u0424\u043e\u0442\u043e",
+        "back_btn":     "\U0001f519 \u041d\u0430\u0437\u0430\u0434",
+        "ai_welcome":   "\U0001f916 <b>AI \u0427\u0430\u0442</b>!\n\n\U0001f4ac \u041e\u0442\u043f\u0440\u0430\u0432\u044c\u0442\u0435 \u0442\u0435\u043a\u0441\u0442, \u0444\u043e\u0442\u043e \u0438\u043b\u0438 \u0433\u043e\u043b\u043e\u0441.",
+        "ai_thinking":  "\u23f3 \u0414\u0443\u043c\u0430\u044e...",
+        "ai_error":     "\u274c \u041e\u0448\u0438\u0431\u043a\u0430. \u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u0441\u043d\u043e\u0432\u0430.",
+        "qr_welcome":   "\U0001f4f7 <b>QR \u041a\u043e\u0434</b>!\n\n\u270f\ufe0f \u041e\u0442\u043f\u0440\u0430\u0432\u044c\u0442\u0435 \u0442\u0435\u043a\u0441\u0442 \u0438\u043b\u0438 \u0441\u0441\u044b\u043b\u043a\u0443.",
+        "qr_success":   "\u2705 QR \u043a\u043e\u0434 \u0433\u043e\u0442\u043e\u0432!",
+        "qr_error":     "\u274c \u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u0441\u043e\u0437\u0434\u0430\u043d\u0438\u0438 QR.",
+        "qr_only_text": "\u26a0\ufe0f \u041e\u0442\u043f\u0440\u0430\u0432\u044c\u0442\u0435 \u0442\u043e\u043b\u044c\u043a\u043e <b>\u0442\u0435\u043a\u0441\u0442 \u0438\u043b\u0438 \u0441\u0441\u044b\u043b\u043a\u0443</b>.",
+        "pdf_welcome":  "\U0001f4c4 <b>PDF \u0413\u0435\u043d\u0435\u0440\u0430\u0442\u043e\u0440</b>!\n\n\u270f\ufe0f \u041e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u0439\u0442\u0435 \u0442\u0435\u043a\u0441\u0442 \u043f\u043e \u0447\u0430\u0441\u0442\u044f\u043c.",
+        "pdf_collect":  "\U0001f4dd \u041f\u043e\u043b\u0443\u0447\u0435\u043d\u043e! <b>{parts}</b> \u0447\u0430\u0441\u0442\u0435\u0439, <b>{chars}</b> \u0441\u0438\u043c\u0432\u043e\u043b\u043e\u0432.\n\n\u041f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u0435\u0442\u0435?",
+        "pdf_done_btn": "\u2705 \u0421\u043e\u0437\u0434\u0430\u0442\u044c PDF",
+        "pdf_undo_btn": "\u21a9\ufe0f \u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0435\u0435",
+        "pdf_cleared":  "\u21a9\ufe0f \u041f\u043e\u0441\u043b\u0435\u0434\u043d\u044f\u044f \u0447\u0430\u0441\u0442\u044c \u0443\u0434\u0430\u043b\u0435\u043d\u0430.",
+        "pdf_empty":    "\u26a0\ufe0f \u041d\u0435\u0442 \u0442\u0435\u043a\u0441\u0442\u0430.",
+        "pdf_process":  "\u23f3 \u0421\u043e\u0437\u0434\u0430\u044e PDF...",
+        "pdf_success":  "\u2705 PDF \u0433\u043e\u0442\u043e\u0432!",
+        "pdf_error":    "\u274c \u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u0441\u043e\u0437\u0434\u0430\u043d\u0438\u0438 PDF.",
+        "tts_welcome":  "\U0001f399 <b>\u0422\u0435\u043a\u0441\u0442 \u0432 \u0413\u043e\u043b\u043e\u0441</b>!\n\n\u270f\ufe0f \u041e\u0442\u043f\u0440\u0430\u0432\u044c\u0442\u0435 \u0442\u0435\u043a\u0441\u0442.",
+        "tts_process":  "\u23f3 \u0421\u043e\u0437\u0434\u0430\u044e \u0430\u0443\u0434\u0438\u043e...",
+        "tts_success":  "\u2705 \u0410\u0443\u0434\u0438\u043e \u0433\u043e\u0442\u043e\u0432\u043e!",
+        "tts_error":    "\u274c \u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u0441\u043e\u0437\u0434\u0430\u043d\u0438\u0438 \u0430\u0443\u0434\u0438\u043e.",
+        "excel_welcome":"\U0001f4ca <b>Excel \u0413\u0435\u043d\u0435\u0440\u0430\u0442\u043e\u0440</b>!\n\n\u0424\u043e\u0440\u043c\u0430\u0442:\n<code>\u0418\u043c\u044f, \u0412\u043e\u0437\u0440\u0430\u0441\u0442, \u0413\u043e\u0440\u043e\u0434\n\u0410\u043b\u0438, 25, \u0422\u0430\u0448\u043a\u0435\u043d\u0442</code>",
+        "excel_process":"\u23f3 \u0421\u043e\u0437\u0434\u0430\u044e Excel...",
+        "excel_success":"\u2705 Excel \u0433\u043e\u0442\u043e\u0432!",
+        "excel_error":  "\u274c \u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u0441\u043e\u0437\u0434\u0430\u043d\u0438\u0438 Excel.",
+        "wm_welcome":   "\U0001f5bc <b>\u0422\u0435\u043a\u0441\u0442 \u043d\u0430 \u0424\u043e\u0442\u043e</b>!\n\n\U0001f4f8 \u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u043e\u0442\u043f\u0440\u0430\u0432\u044c\u0442\u0435 \u0444\u043e\u0442\u043e:",
+        "wm_got_photo": "\u2705 \u0424\u043e\u0442\u043e \u043f\u043e\u043b\u0443\u0447\u0435\u043d\u043e!\n\n\u270f\ufe0f \u041e\u0442\u043f\u0440\u0430\u0432\u044c\u0442\u0435 <b>\u0442\u0435\u043a\u0441\u0442</b>:",
+        "wm_process":   "\u23f3 \u041e\u0431\u0440\u0430\u0431\u0430\u0442\u044b\u0432\u0430\u044e...",
+        "wm_success":   "\u2705 \u0424\u043e\u0442\u043e \u0433\u043e\u0442\u043e\u0432\u043e!",
+        "wm_error":     "\u274c \u041e\u0448\u0438\u0431\u043a\u0430.",
+        "wm_no_photo":  "\u26a0\ufe0f \u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u043e\u0442\u043f\u0440\u0430\u0432\u044c\u0442\u0435 \u0444\u043e\u0442\u043e!",
+        "wm_only_photo":"\u26a0\ufe0f \u041e\u0442\u043f\u0440\u0430\u0432\u044c\u0442\u0435 \u0442\u043e\u043b\u044c\u043a\u043e \u0444\u043e\u0442\u043e.",
     },
     "en": {
-        "subscribe_msg": (
-            "⚠️ You need to subscribe to our channel to use this bot!\n\n"
-            "👇 Click the button below to subscribe:"
-        ),
-        "subscribe_channel_btn": "📢 Go to Channel",
-        "subscribe_check": "✅ I subscribed",
-        "subscribe_error": "❌ You haven't subscribed yet!\n\nPlease subscribe to the channel first 👇",
-        "subscribe_success": "✅ Subscription confirmed! You can use the bot now.",
-        "unsubscribed_msg": (
-            "⚠️ You have left the channel!\n\n"
-            "To continue using the bot, you need to subscribe again 👇"
-        ),
-        "welcome": (
-            "👋 Hello! I'm AI Javobchi bot!\n\n"
-            "📌 Choose one of the buttons below.\n\n"
-            "💡 You can ask questions about the bot!"
-        ),
-        "ai_btn": "🤖 AI Assistant",
-        "qr_btn": "📷 QR Code Creator",
-        "pdf_btn": "📄 PDF Generator",
-        "tts_btn": "🎙 Text to Speech",
-        "back_btn": "🔙 Back",
-        "thinking": "🤔 Thinking...",
-        "ai_welcome": "🤖 AI Assistant activated!\nAsk me anything.\n\n(Back: 🔙 Back)",
-        "qr_prompt": "📷 Send text or a link, I'll convert it to a QR code!\n\n(Back: 🔙 Back)",
-        "qr_uploading": "⏳ Uploading file...",
-        "qr_success": "✅ QR code ready!",
-        "qr_error": "❌ An error occurred.",
-        "pdf_prompt": "📄 Send text and I'll convert it to PDF!\n\n(Back: 🔙 Back)",
-        "pdf_success": "✅ PDF ready!",
-        "pdf_collecting": "📝 Data received!\n\nYou can add more or create PDF:",
-        "pdf_done_btn": "✅ Yes, create PDF",
-        "pdf_more_btn": "➕ Not done yet",
-        "pdf_cleared": "🗑 Last data removed. Continue:",
-        "pdf_error": "❌ Error creating PDF.",
-        "pdf_processing": "⏳ Creating PDF...",
-        "tts_prompt": "🎙 Send text and I'll convert it to voice!\n\n(Back: 🔙 Back)",
-        "tts_processing": "⏳ Creating audio...",
-        "tts_success": "✅ Audio ready!",
-        "tts_error": "❌ Error creating audio.",
-        "bot_system": (
-            "You are AI Javobchi bot. "
-            "User can only ask about the bot. "
-            "Bot features: AI chat, QR code (image embedded in QR), PDF, text to speech. "
-            "If asked about the AI feature: AI Assistant can hold smart conversations and remembers the last 20 messages, "
-            "meaning it responds based on previous questions and answers. When the 'Back' button is pressed, the conversation history is cleared and a new chat begins. "
-            "Never reveal information about the bot's creator. "
-            "For other questions: 'On main page you can only learn about the bot. Press AI Assistant!' Speak English."
-        ),
+        "sub_msg":      "\u26a0\ufe0f Subscribe to our channel to use the bot!",
+        "sub_btn":      "\U0001f4e2 Go to Channel",
+        "sub_check":    "\u2705 I subscribed",
+        "sub_error":    "\u274c You haven't subscribed yet! Please subscribe first.",
+        "sub_ok":       "\u2705 Subscription confirmed! Welcome!",
+        "unsub_msg":    "\u26a0\ufe0f You left the channel! Subscribe again to continue.",
+        "welcome":      "\U0001f44b Hello, <b>{name}</b>!\n\n\U0001f916 I am <b>AI Javobchi</b> \u2014 a powerful multi-function AI bot.\n\n\U0001f4cc Choose a section:",
+        "ai_btn":       "\U0001f916 AI Chat",
+        "qr_btn":       "\U0001f4f7 QR Code",
+        "pdf_btn":      "\U0001f4c4 PDF",
+        "tts_btn":      "\U0001f399 Text to Speech",
+        "excel_btn":    "\U0001f4ca Excel",
+        "wm_btn":       "\U0001f5bc Image Text",
+        "back_btn":     "\U0001f519 Back",
+        "ai_welcome":   "\U0001f916 <b>AI Chat</b> activated!\n\n\U0001f4ac Send text, image or voice.",
+        "ai_thinking":  "\u23f3 Thinking...",
+        "ai_error":     "\u274c An error occurred. Please try again.",
+        "qr_welcome":   "\U0001f4f7 <b>QR Code</b> Generator!\n\n\u270f\ufe0f Send text or a link.",
+        "qr_success":   "\u2705 QR code ready!",
+        "qr_error":     "\u274c Error creating QR code.",
+        "qr_only_text": "\u26a0\ufe0f Please send only <b>text or a link</b>.",
+        "pdf_welcome":  "\U0001f4c4 <b>PDF Generator</b>!\n\n\u270f\ufe0f Send text in parts then create PDF.",
+        "pdf_collect":  "\U0001f4dd Received! <b>{parts}</b> parts, <b>{chars}</b> chars.\n\nContinue?",
+        "pdf_done_btn": "\u2705 Create PDF",
+        "pdf_undo_btn": "\u21a9\ufe0f Remove last",
+        "pdf_cleared":  "\u21a9\ufe0f Last part removed.",
+        "pdf_empty":    "\u26a0\ufe0f No text yet.",
+        "pdf_process":  "\u23f3 Creating PDF...",
+        "pdf_success":  "\u2705 PDF ready!",
+        "pdf_error":    "\u274c Error creating PDF.",
+        "tts_welcome":  "\U0001f399 <b>Text to Speech</b>!\n\n\u270f\ufe0f Send text.",
+        "tts_process":  "\u23f3 Creating audio...",
+        "tts_success":  "\u2705 Audio ready!",
+        "tts_error":    "\u274c Error creating audio.",
+        "excel_welcome":"\U0001f4ca <b>Excel Generator</b>!\n\nFormat:\n<code>Name, Age, City\nAli, 25, Tashkent</code>",
+        "excel_process":"\u23f3 Creating Excel...",
+        "excel_success":"\u2705 Excel ready!",
+        "excel_error":  "\u274c Error creating Excel.",
+        "wm_welcome":   "\U0001f5bc <b>Image Text</b>!\n\n\U0001f4f8 First send a photo:",
+        "wm_got_photo": "\u2705 Photo received!\n\n\u270f\ufe0f Now send the <b>text</b>:",
+        "wm_process":   "\u23f3 Processing image...",
+        "wm_success":   "\u2705 Image ready!",
+        "wm_error":     "\u274c An error occurred.",
+        "wm_no_photo":  "\u26a0\ufe0f Send a photo first!",
+        "wm_only_photo":"\u26a0\ufe0f Please send a photo only.",
     }
 }
 
-# ✅ FIX #3: Obuna tekshiruvida xato bo'lsa True qaytaradi (bloklamaydi)
-async def check_subscription(user_id: int) -> bool:
-    try:
-        member = await bot.get_chat_member(chat_id=CHANNEL, user_id=user_id)
-        return member.status not in ["left", "kicked", "banned"]
-    except Exception as e:
-        logging.error(f"Obuna tekshirish xatosi: {e}")
-        return True  # ✅ Xato bo'lsa, foydalanuvchini bloklamas
+BACK_TEXTS = ["\U0001f519 Orqaga", "\U0001f519 \u041d\u0430\u0437\u0430\u0434", "\U0001f519 Back"]
 
-def get_subscribe_keyboard(lang: str):
+def kb_lang():
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="\U0001f1fa\U0001f1ff O'zbek"), KeyboardButton(text="\U0001f1f7\U0001f1fa \u0420\u0443\u0441\u0441\u043a\u0438\u0439")],
+        [KeyboardButton(text="\U0001f1ec\U0001f1e7 English")]
+    ], resize_keyboard=True)
+
+def kb_main(lang):
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text=T[lang]["ai_btn"])],
+        [KeyboardButton(text=T[lang]["qr_btn"]), KeyboardButton(text=T[lang]["pdf_btn"])],
+        [KeyboardButton(text=T[lang]["tts_btn"]), KeyboardButton(text=T[lang]["excel_btn"])],
+        [KeyboardButton(text=T[lang]["wm_btn"])]
+    ], resize_keyboard=True)
+
+def kb_back(lang):
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text=T[lang]["back_btn"])]
+    ], resize_keyboard=True)
+
+def kb_subscribe(lang):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=TEXTS[lang]["subscribe_channel_btn"], url="https://t.me/uzinnotech")],
-        [InlineKeyboardButton(text=TEXTS[lang]["subscribe_check"], callback_data=f"check_sub_{lang}")]
+        [InlineKeyboardButton(text=T[lang]["sub_btn"], url="https://t.me/uzinnotech")],
+        [InlineKeyboardButton(text=T[lang]["sub_check"], callback_data=f"sub_{lang}")]
     ])
 
-def get_language_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🇺🇿 O'zbek"), KeyboardButton(text="🇷🇺 Русский")],
-            [KeyboardButton(text="🇬🇧 English")]
-        ],
-        resize_keyboard=True
-    )
+async def get_lang(state):
+    d = await state.get_data()
+    return d.get("language", "uz")
 
-def get_main_keyboard(lang):
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=TEXTS[lang]["ai_btn"])],
-            [KeyboardButton(text=TEXTS[lang]["qr_btn"]), KeyboardButton(text=TEXTS[lang]["pdf_btn"])],
-            [KeyboardButton(text=TEXTS[lang]["tts_btn"])]
-        ],
-        resize_keyboard=True
-    )
-
-def get_back_keyboard(lang):
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=TEXTS[lang]["back_btn"])]],
-        resize_keyboard=True
-    )
-
-def make_qr(data: str) -> bytes:
-    qr = qrcode.QRCode(version=1, box_size=10, border=4)
-    qr.add_data(data)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return buf.read()
-
-def make_tts(text: str, lang: str) -> bytes:
-    # gTTS "uz" ni qollab-quvvatlamaydi, shuning uchun "tr" ishlatamiz
-    lang_map = {"uz": "tr", "ru": "ru", "en": "en"}
-    tts_lang = lang_map.get(lang, "tr")
-    tts = gTTS(text=text, lang=tts_lang)
-    buf = io.BytesIO()
-    tts.write_to_fp(buf)
-    buf.seek(0)
-    return buf.read()
-
-async def upload_to_fileio(file_bytes: bytes, filename: str):
-    # file.io ishlamasa, 0x0.st ga urinib korilamiz
+async def is_subscribed(user_id):
     try:
-        async with aiohttp.ClientSession() as session:
-            form = aiohttp.FormData()
-            form.add_field("file", file_bytes, filename=filename)
-            form.add_field("expires", "1d")
-            async with session.post("https://file.io", data=form, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                if resp.status == 200:
-                    content_type = resp.headers.get("Content-Type", "")
-                    if "application/json" in content_type:
-                        data = await resp.json()
-                        if data.get("success"):
-                            return data.get("link")
-    except Exception as e:
-        logging.error(f"file.io xatosi: {e}")
-    # Backup: 0x0.st
-    try:
-        async with aiohttp.ClientSession() as session:
-            form = aiohttp.FormData()
-            form.add_field("file", file_bytes, filename=filename)
-            async with session.post("https://0x0.st", data=form, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                if resp.status == 200:
-                    link = (await resp.text()).strip()
-                    if link.startswith("http"):
-                        return link
-    except Exception as e:
-        logging.error(f"0x0.st xatosi: {e}")
-    return None
-
-async def check_and_notify_subscription(message: Message, state: FSMContext) -> bool:
-    data = await state.get_data()
-    lang = data.get("language", "uz")
-    is_subscribed = await check_subscription(message.from_user.id)
-    if not is_subscribed:
-        await message.answer(TEXTS[lang]["unsubscribed_msg"], reply_markup=get_subscribe_keyboard(lang))
+        m = await bot.get_chat_member(chat_id=CHANNEL, user_id=user_id)
+        return m.status not in ["left", "kicked", "banned"]
+    except Exception:
         return True
+
+async def check_sub(message, state):
+    if not await is_subscribed(message.from_user.id):
+        lang = await get_lang(state)
+        await message.answer(T[lang]["unsub_msg"], reply_markup=kb_subscribe(lang))
+        return False
+    return True
+
+async def send_chunks(message, text):
+    for i in range(0, len(text), 4000):
+        await message.answer(text[i:i+4000])
+
+def get_font(size):
+    paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    for p in paths:
+        if os.path.exists(p):
+            try:
+                return ImageFont.truetype(p, size)
+            except Exception:
+                pass
+    return ImageFont.load_default()
+
+def setup_pdf_font(pdf, size):
+    paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    ]
+    for p in paths:
+        if os.path.exists(p):
+            try:
+                pdf.add_font("UniFont", "", p, uni=True)
+                pdf.set_font("UniFont", size=size)
+                return True
+            except Exception:
+                pass
+    pdf.set_font("Helvetica", size=size)
     return False
 
-# ✅ FIX #8: Uzun xabarni bo'lib yuborish helper funksiyasi
-async def send_long_message(message: Message, text: str):
-    if len(text) > 4000:
-        for i in range(0, len(text), 4000):
-            await message.answer(text[i:i+4000])
-    else:
-        await message.answer(text)
+async def ai_text_req(messages, lang):
+    system = {
+        "uz": "Sen aqlli AI assistantsan. O'zbek tilida aniq va foydali javob ber.",
+        "ru": "\u0422\u044b \u0443\u043c\u043d\u044b\u0439 AI \u0430\u0441\u0441\u0438\u0441\u0442\u0435\u043d\u0442. \u041e\u0442\u0432\u0435\u0447\u0430\u0439 \u043f\u043e-\u0440\u0443\u0441\u0441\u043a\u0438.",
+        "en": "You are a smart AI assistant. Answer clearly in English."
+    }.get(lang, "You are a helpful AI assistant.")
+    try:
+        async with aiohttp.ClientSession() as sess:
+            r = await sess.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [{"role": "system", "content": system}, *messages],
+                    "temperature": 0.7,
+                    "max_tokens": 2000
+                },
+                timeout=aiohttp.ClientTimeout(total=30)
+            )
+            if r.status == 200:
+                d = await r.json()
+                return d["choices"][0]["message"]["content"]
+    except Exception as e:
+        log.error(f"Groq error: {e}")
+    return None
+
+async def ai_vision_req(image_bytes, prompt, lang):
+    sys_p = {
+        "uz": "Rasmni batafsil tahlil qil. O'zbek tilida javob ber.",
+        "ru": "\u041f\u043e\u0434\u0440\u043e\u0431\u043d\u043e \u043f\u0440\u043e\u0430\u043d\u0430\u043b\u0438\u0437\u0438\u0440\u0443\u0439 \u0438\u0437\u043e\u0431\u0440\u0430\u0436\u0435\u043d\u0438\u0435. \u041e\u0442\u0432\u0435\u0447\u0430\u0439 \u043f\u043e-\u0440\u0443\u0441\u0441\u043a\u0438.",
+        "en": "Analyze the image in detail. Answer in English."
+    }.get(lang, "Analyze the image.")
+    try:
+        img_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        async with aiohttp.ClientSession() as sess:
+            r = await sess.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}",
+                json={
+                    "contents": [{
+                        "parts": [
+                            {"text": sys_p + "\n\n" + (prompt or "Bu rasmda nima bor? Batafsil tushuntir.")},
+                            {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
+                        ]
+                    }],
+                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2000}
+                },
+                timeout=aiohttp.ClientTimeout(total=30)
+            )
+            if r.status == 200:
+                d = await r.json()
+                return d["candidates"][0]["content"]["parts"][0]["text"]
+            else:
+                err = await r.text()
+                log.error(f"Gemini {r.status}: {err}")
+    except Exception as e:
+        log.error(f"Gemini error: {e}")
+    return None
+
+async def ai_voice_req(audio_bytes):
+    try:
+        async with aiohttp.ClientSession() as sess:
+            form = aiohttp.FormData()
+            form.add_field("file", audio_bytes, filename="voice.ogg", content_type="audio/ogg")
+            form.add_field("model", "whisper-large-v3")
+            r = await sess.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                data=form,
+                timeout=aiohttp.ClientTimeout(total=30)
+            )
+            if r.status == 200:
+                d = await r.json()
+                return d.get("text", "")
+    except Exception as e:
+        log.error(f"Whisper error: {e}")
+    return None
 
 @dp.message(Command("start"))
-async def start_handler(message: Message, state: FSMContext):
-    user = message.from_user
-    user_data = {
-        "name": user.full_name,
-        "username": f"@{user.username}" if user.username else "—",
-        "lang": "—",
-        "date": datetime.now().strftime("%d.%m.%Y %H:%M")
+async def cmd_start(msg: Message, state: FSMContext):
+    uid = str(msg.from_user.id)
+    users_db[uid] = {
+        "name": msg.from_user.full_name,
+        "username": f"@{msg.from_user.username}" if msg.from_user.username else "\u2014",
+        "lang": users_db.get(uid, {}).get("lang", "\u2014"),
+        "date": datetime.now().strftime("%d.%m.%Y %H:%M"),
+        "count": users_db.get(uid, {}).get("count", 0) + 1
     }
-    users_db[str(user.id)] = user_data  # ✅ str key JSON uchun
-    save_users_db(users_db)             # ✅ Darhol saqlanadi
-    await state.set_state(UserState.choosing_language)
-    await message.answer(
-        "👋 Assalomu aleykum! / Здравствуйте! / Hello!\n\n🌐 Tilni tanlang / Выберите язык / Choose language:",
-        reply_markup=get_language_keyboard()
+    db_save(users_db)
+    await state.set_state(S.lang)
+    await msg.answer(
+        "\U0001f44b Assalomu alaykum! / \u0417\u0434\u0440\u0430\u0432\u0441\u0442\u0432\u0443\u0439\u0442\u0435! / Hello!\n\n\U0001f310 Tilni tanlang / \u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u044f\u0437\u044b\u043a / Choose language:",
+        reply_markup=kb_lang()
     )
 
-@dp.message(Command("stats"))
-async def stats_handler(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    total = len(users_db)
-    if total == 0:
-        await message.answer("📊 Hali hech kim botdan foydalanmagan.")
-        return
-    langs = {"uz": 0, "ru": 0, "en": 0, "—": 0}
-    for u in users_db.values():
-        l = u.get("lang", "—")
-        langs[l] = langs.get(l, 0) + 1
-    last_users = list(users_db.items())[-10:]
-    last_text = ""
-    for uid, u in reversed(last_users):
-        last_text += f"\n👤 {u['name']} {u['username']} | {u['lang']} | {u['date']}"
-    text = (
-        f"📊 <b>Bot statistikasi</b>\n\n"
-        f"👥 Jami foydalanuvchilar: <b>{total}</b>\n\n"
-        f"🌐 Tillar:\n"
-        f"  🇺🇿 O'zbek: {langs.get('uz', 0)}\n"
-        f"  🇷🇺 Rus: {langs.get('ru', 0)}\n"
-        f"  🇬🇧 Ingliz: {langs.get('en', 0)}\n\n"
-        f"🕐 Oxirgi 10 ta foydalanuvchi:{last_text}"
-    )
-    await message.answer(text, parse_mode="HTML")
-
-@dp.message(UserState.choosing_language)
-async def language_selected(message: Message, state: FSMContext):
-    text = message.text or ""
-    if "🇺🇿" in text:
-        lang = "uz"
-    elif "🇷🇺" in text:
-        lang = "ru"
-    elif "🇬🇧" in text:
-        lang = "en"
+@dp.message(S.lang)
+async def choose_lang(msg: Message, state: FSMContext):
+    t = msg.text or ""
+    if "\U0001f1fa\U0001f1ff" in t or "O'zbek" in t: lang = "uz"
+    elif "\U0001f1f7\U0001f1fa" in t or "\u0420\u0443\u0441" in t: lang = "ru"
+    elif "\U0001f1ec\U0001f1e7" in t or "English" in t: lang = "en"
     else:
-        await message.answer("Iltimos, tilni tanlang:", reply_markup=get_language_keyboard())
+        await msg.answer("Iltimos, tilni tanlang:", reply_markup=kb_lang())
         return
     await state.update_data(language=lang)
-    uid = str(message.from_user.id)
+    uid = str(msg.from_user.id)
     if uid in users_db:
         users_db[uid]["lang"] = lang
-        save_users_db(users_db)  # ✅ Til yangilanishi saqlanadi
-    is_subscribed = await check_subscription(message.from_user.id)
-    if not is_subscribed:
-        await message.answer(TEXTS[lang]["subscribe_msg"], reply_markup=get_subscribe_keyboard(lang))
+        db_save(users_db)
+    if not await is_subscribed(msg.from_user.id):
+        await msg.answer(T[lang]["sub_msg"], reply_markup=kb_subscribe(lang))
         return
-    await state.set_state(UserState.main_menu)
-    await message.answer(TEXTS[lang]["welcome"], reply_markup=get_main_keyboard(lang))
+    await state.set_state(S.menu)
+    await msg.answer(T[lang]["welcome"].format(name=msg.from_user.first_name), reply_markup=kb_main(lang), parse_mode="HTML")
 
-@dp.callback_query(F.data.startswith("check_sub_"))
-async def check_sub_callback(callback: CallbackQuery, state: FSMContext):
-    lang = callback.data.split("_")[-1]
-    is_subscribed = await check_subscription(callback.from_user.id)
-    if is_subscribed:
+@dp.callback_query(F.data.startswith("sub_"))
+async def cb_sub(cb: CallbackQuery, state: FSMContext):
+    lang = cb.data.split("_")[1]
+    if await is_subscribed(cb.from_user.id):
         await state.update_data(language=lang)
-        await state.set_state(UserState.main_menu)
-        await callback.message.answer(TEXTS[lang]["subscribe_success"], reply_markup=get_main_keyboard(lang))
-        await callback.answer("✅")
+        await state.set_state(S.menu)
+        await cb.message.answer(T[lang]["sub_ok"], reply_markup=kb_main(lang))
+        await cb.answer("\u2705")
     else:
-        await callback.answer(TEXTS[lang]["subscribe_error"], show_alert=True)
+        await cb.answer(T[lang]["sub_error"], show_alert=True)
 
-# ✅ FIX #7: Back handler faqat tegishli holatlarda ishlaydi
-@dp.message(F.text.in_(["🔙 Orqaga", "🔙 Назад", "🔙 Back"]))
-async def go_back(message: Message, state: FSMContext):
-    current_state = await state.get_state()
-    # Agar til tanlash holatida bo'lsa, orqaga borishni e'tiborsiz qoldiramiz
-    if current_state == UserState.choosing_language:
+@dp.message(F.text.in_(["\U0001f519 Orqaga", "\U0001f519 \u041d\u0430\u0437\u0430\u0434", "\U0001f519 Back"]))
+async def go_back(msg: Message, state: FSMContext):
+    cur = await state.get_state()
+    if cur == S.lang:
         return
-    if await check_and_notify_subscription(message, state):
+    lang = await get_lang(state)
+    await state.update_data(chat_history=[], pdf_parts=[], pdf_msg_ids=[], pdf_prompt_ids=[], wm_photo_id=None)
+    await state.set_state(S.menu)
+    await msg.answer(T[lang]["welcome"].format(name=msg.from_user.first_name), reply_markup=kb_main(lang), parse_mode="HTML")
+
+@dp.message(Command("stats"))
+async def cmd_stats(msg: Message):
+    if msg.from_user.id != ADMIN_ID:
         return
-    data = await state.get_data()
-    lang = data.get("language", "uz")
+    total = len(users_db)
+    langs = {"uz": 0, "ru": 0, "en": 0}
+    for u in users_db.values():
+        l = u.get("lang", "\u2014")
+        langs[l] = langs.get(l, 0) + 1
+    last = list(users_db.items())[-10:]
+    last_txt = ""
+    for uid, u in reversed(last):
+        last_txt += f"\n\u2022 {u['name']} {u['username']} [{u['lang']}] \u2014 {u['date']}"
+    await msg.answer(
+        f"\U0001f4ca <b>Bot Statistikasi</b>\n\n"
+        f"\U0001f465 Jami: <b>{total}</b>\n\n"
+        f"\U0001f310 Tillar:\n"
+        f"  \U0001f1fa\U0001f1ff O'zbek: <b>{langs.get('uz',0)}</b>\n"
+        f"  \U0001f1f7\U0001f1fa Rus: <b>{langs.get('ru',0)}</b>\n"
+        f"  \U0001f1ec\U0001f1e7 Ingliz: <b>{langs.get('en',0)}</b>\n\n"
+        f"\U0001f550 So'nggi 10:{last_txt}",
+        parse_mode="HTML"
+    )
+
+# AI CHAT
+@dp.message(F.text.in_(["\U0001f916 AI Suhbat", "\U0001f916 AI \u0427\u0430\u0442", "\U0001f916 AI Chat"]))
+async def ai_start(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    lang = await get_lang(state)
+    await state.set_state(S.ai_chat)
     await state.update_data(chat_history=[])
-    await state.set_state(UserState.main_menu)
-    await message.answer(TEXTS[lang]["welcome"], reply_markup=get_main_keyboard(lang))
+    await msg.answer(T[lang]["ai_welcome"], reply_markup=kb_back(lang), parse_mode="HTML")
 
-@dp.message(F.text == "🤖 AI Assistant")
-async def ai_start(message: Message, state: FSMContext):
-    if await check_and_notify_subscription(message, state):
-        return
+@dp.message(S.ai_chat, F.text)
+async def ai_text_handler(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    if msg.text in ["\U0001f519 Orqaga", "\U0001f519 \u041d\u0430\u0437\u0430\u0434", "\U0001f519 Back"]: return
+    lang = await get_lang(state)
     data = await state.get_data()
-    lang = data.get("language", "uz")
-    await state.set_state(UserState.ai_chat)
-    await message.answer(TEXTS[lang]["ai_welcome"], reply_markup=get_back_keyboard(lang))
-
-@dp.message(F.text.in_(["📷 QR Kod yaratuvchi", "📷 QR Код генератор", "📷 QR Code Creator"]))
-async def qr_start(message: Message, state: FSMContext):
-    if await check_and_notify_subscription(message, state):
-        return
-    data = await state.get_data()
-    lang = data.get("language", "uz")
-    await state.set_state(UserState.qr_waiting)
-    await message.answer(TEXTS[lang]["qr_prompt"], reply_markup=get_back_keyboard(lang))
-
-# ✅ FIX #2: PDF handler barcha 3 tildagi tugmani qamrab oladi
-@dp.message(F.text.in_(["📄 PDF Generator", "📄 PDF Генератор"]))
-async def pdf_start(message: Message, state: FSMContext):
-    if await check_and_notify_subscription(message, state):
-        return
-    data = await state.get_data()
-    lang = data.get("language", "uz")
-    await state.set_state(UserState.pdf_waiting)
-    await message.answer(TEXTS[lang]["pdf_prompt"], reply_markup=get_back_keyboard(lang))
-
-@dp.message(F.text.in_(["🎙 Matnni ovozga aylantirish", "🎙 Текст в голос", "🎙 Text to Speech"]))
-async def tts_start(message: Message, state: FSMContext):
-    if await check_and_notify_subscription(message, state):
-        return
-    data = await state.get_data()
-    lang = data.get("language", "uz")
-    await state.set_state(UserState.tts_waiting)
-    await message.answer(TEXTS[lang]["tts_prompt"], reply_markup=get_back_keyboard(lang))
-
-@dp.message(UserState.main_menu)
-async def main_menu_handler(message: Message, state: FSMContext):
-    if await check_and_notify_subscription(message, state):
-        return
-    text = message.text or ""
-    if not text:
-        return
-    data = await state.get_data()
-    lang = data.get("language", "uz")
-    wait_msg = await message.answer(TEXTS[lang]["thinking"])
-    try:
-        url = "https://api.groq.com/openai/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-        payload = {
-            "model": "llama-3.3-70b-versatile",
-            "messages": [
-                {"role": "system", "content": TEXTS[lang]["bot_system"]},
-                {"role": "user", "content": text}
-            ],
-            "temperature": 0.7,
-            "max_tokens": 500
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                if response.status == 200:
-                    d = await response.json()
-                    reply = d["choices"][0]["message"]["content"]
-                else:
-                    reply = TEXTS[lang]["qr_error"]
-    except Exception as e:
-        logging.error(f"Groq xatosi: {e}")
-        reply = TEXTS[lang]["qr_error"]
-    try:
-        await wait_msg.delete()
-    except:
-        pass
-    # ✅ FIX #8: main_menu_handler da ham uzun xabar bo'lib yuboriladi
-    await send_long_message(message, reply)
-
-@dp.message(UserState.ai_chat)
-async def ai_chat_handler(message: Message, state: FSMContext):
-    if await check_and_notify_subscription(message, state):
-        return
-    text = message.text or ""
-    if not text:
-        return
-    data = await state.get_data()
-    lang = data.get("language", "uz")
-    if lang == "uz":
-        system_msg = "Sen yordamchi AI assistantsan. O'zbek tilida aniq va tushunarli javob ber."
-    elif lang == "ru":
-        system_msg = "Ты AI-помощник. Отвечай на русском языке четко и понятно."
+    history = data.get("chat_history", [])
+    wait = await msg.answer(T[lang]["ai_thinking"])
+    history.append({"role": "user", "content": msg.text})
+    if len(history) > 20: history = history[-20:]
+    reply = await ai_text_req(history, lang)
+    await wait.delete()
+    if reply:
+        history.append({"role": "assistant", "content": reply})
+        await state.update_data(chat_history=history)
+        await send_chunks(msg, reply)
     else:
-        system_msg = "You are a helpful AI assistant. Answer clearly and concisely in English."
-    chat_history = data.get("chat_history", [])
-    chat_history.append({"role": "user", "content": text})
-    if len(chat_history) > 20:
-        chat_history = chat_history[-20:]
-    wait_msg = await message.answer(TEXTS[lang]["thinking"])
+        await msg.answer(T[lang]["ai_error"])
+
+@dp.message(S.ai_chat, F.photo)
+async def ai_photo_handler(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    lang = await get_lang(state)
+    wait = await msg.answer(T[lang]["ai_thinking"])
     try:
-        url = "https://api.groq.com/openai/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-        payload = {
-            "model": "llama-3.3-70b-versatile",
-            "messages": [{"role": "system", "content": system_msg}, *chat_history],
-            "temperature": 0.7,
-            "max_tokens": 2000
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                if response.status == 200:
-                    d = await response.json()
-                    reply = d["choices"][0]["message"]["content"]
-                else:
-                    reply = TEXTS[lang]["qr_error"]
+        file = await bot.get_file(msg.photo[-1].file_id)
+        buf = io.BytesIO()
+        await bot.download_file(file.file_path, buf)
+        buf.seek(0)
+        img = Image.open(buf).convert("RGB")
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=85)
+        out.seek(0)
+        reply = await ai_vision_req(out.read(), msg.caption or "", lang)
+        await wait.delete()
+        if reply:
+            await send_chunks(msg, reply)
+        else:
+            await msg.answer(T[lang]["ai_error"])
     except Exception as e:
-        logging.error(f"Groq xatosi: {e}")
-        reply = TEXTS[lang]["qr_error"]
-    chat_history.append({"role": "assistant", "content": reply})
-    await state.update_data(chat_history=chat_history)
-    try:
-        await wait_msg.delete()
-    except:
-        pass
-    await send_long_message(message, reply)
+        log.error(f"AI photo: {e}")
+        await wait.delete()
+        await msg.answer(T[lang]["ai_error"])
 
-@dp.message(UserState.qr_waiting, F.text)
-async def qr_from_text(message: Message, state: FSMContext):
-    if await check_and_notify_subscription(message, state):
-        return
-    data = await state.get_data()
-    lang = data.get("language", "uz")
-    text = message.text or ""
-    if text.startswith("/"):
-        return
+@dp.message(S.ai_chat, F.voice)
+async def ai_voice_handler(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    lang = await get_lang(state)
+    wait = await msg.answer(T[lang]["ai_thinking"])
     try:
-        qr_bytes = make_qr(text)
-        photo = BufferedInputFile(qr_bytes, filename="qrcode.png")
-        await message.answer_photo(photo, caption=f"{TEXTS[lang]['qr_success']}\n📝 {text[:100]}{'...' if len(text) > 100 else ''}")
-        await message.answer(TEXTS[lang]["qr_prompt"])
+        file = await bot.get_file(msg.voice.file_id)
+        buf = io.BytesIO()
+        await bot.download_file(file.file_path, buf)
+        text = await ai_voice_req(buf.getvalue())
+        if not text:
+            await wait.delete()
+            await msg.answer(T[lang]["ai_error"])
+            return
+        data = await state.get_data()
+        history = data.get("chat_history", [])
+        history.append({"role": "user", "content": text})
+        if len(history) > 20: history = history[-20:]
+        reply = await ai_text_req(history, lang)
+        await wait.delete()
+        if reply:
+            history.append({"role": "assistant", "content": reply})
+            await state.update_data(chat_history=history)
+            await msg.answer(f"\U0001f3a4 <i>{text}</i>", parse_mode="HTML")
+            await send_chunks(msg, reply)
+        else:
+            await msg.answer(T[lang]["ai_error"])
     except Exception as e:
-        logging.error(f"QR xatosi: {e}")
-        await message.answer(TEXTS[lang]["qr_error"])
+        log.error(f"AI voice: {e}")
+        await wait.delete()
+        await msg.answer(T[lang]["ai_error"])
 
-@dp.message(UserState.qr_waiting, F.photo)
-async def qr_from_photo(message: Message, state: FSMContext):
-    if await check_and_notify_subscription(message, state):
-        return
+# QR
+@dp.message(F.text.in_(["\U0001f4f7 QR Kod", "\U0001f4f7 QR \u041a\u043e\u0434", "\U0001f4f7 QR Code"]))
+async def qr_start(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    lang = await get_lang(state)
+    await state.set_state(S.qr)
+    await msg.answer(T[lang]["qr_welcome"], reply_markup=kb_back(lang), parse_mode="HTML")
+
+@dp.message(S.qr, F.text)
+async def qr_create(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    if msg.text in ["\U0001f519 Orqaga", "\U0001f519 \u041d\u0430\u0437\u0430\u0434", "\U0001f519 Back"]: return
+    lang = await get_lang(state)
+    try:
+        qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=4)
+        qr.add_data(msg.text)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        await msg.answer_photo(BufferedInputFile(buf.read(), "qr.png"), caption=T[lang]["qr_success"])
+    except Exception as e:
+        log.error(f"QR: {e}")
+        await msg.answer(T[lang]["qr_error"])
+
+@dp.message(S.qr, ~F.text)
+async def qr_wrong(msg: Message, state: FSMContext):
+    lang = await get_lang(state)
+    await msg.answer(T[lang]["qr_only_text"], parse_mode="HTML")
+
+# PDF
+@dp.message(F.text.in_(["\U0001f4c4 PDF"]))
+async def pdf_start(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    lang = await get_lang(state)
+    await state.set_state(S.pdf)
+    await state.update_data(pdf_parts=[], pdf_msg_ids=[], pdf_prompt_ids=[])
+    await msg.answer(T[lang]["pdf_welcome"], reply_markup=kb_back(lang), parse_mode="HTML")
+
+@dp.message(S.pdf, F.text)
+async def pdf_collect(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    if msg.text in ["\U0001f519 Orqaga", "\U0001f519 \u041d\u0430\u0437\u0430\u0434", "\U0001f519 Back"]: return
+    lang = await get_lang(state)
     data = await state.get_data()
-    lang = data.get("language", "uz")
-    msgs = {
-        "uz": "⚠️ QR kod faqat matn va linklar uchun ishlaydi.\nIltimos, matn yoki link yuboring!",
-        "ru": "⚠️ QR код работает только для текста и ссылок.\nПожалуйста, отправьте текст или ссылку!",
-        "en": "⚠️ QR code only works for text and links.\nPlease send text or a link!"
-    }
-    await message.answer(msgs.get(lang, msgs["uz"]))
-
-@dp.message(UserState.qr_waiting, F.audio | F.voice | F.document)
-async def qr_from_file(message: Message, state: FSMContext):
-    if await check_and_notify_subscription(message, state):
-        return
-    data = await state.get_data()
-    lang = data.get("language", "uz")
-    msgs = {
-        "uz": "⚠️ QR kod faqat matn va linklar uchun ishlaydi.\nIltimos, matn yoki link yuboring!",
-        "ru": "⚠️ QR код работает только для текста и ссылок.\nПожалуйста, отправьте текст или ссылку!",
-        "en": "⚠️ QR code only works for text and links.\nPlease send text or a link!"
-    }
-    await message.answer(msgs.get(lang, msgs["uz"]))
-
-@dp.message(UserState.pdf_waiting, F.text)
-async def generate_pdf(message: Message, state: FSMContext):
-    if await check_and_notify_subscription(message, state):
-        return
-    data = await state.get_data()
-    lang = data.get("language", "uz")
-    text = message.text or ""
-    if text.startswith("/"):
-        return
-    if not text:
-        await message.answer(TEXTS[lang]["pdf_prompt"])
-        return
-
-    collected = data.get("pdf_collected", [])
+    parts = data.get("pdf_parts", [])
     msg_ids = data.get("pdf_msg_ids", [])
-    collected.append(text)
-    msg_ids.append(message.message_id)
-    await state.update_data(pdf_collected=collected, pdf_msg_ids=msg_ids)
-
-    total_chars = sum(len(t) for t in collected)
-    info = TEXTS[lang]["pdf_collecting"] + f"\n\xf0\x9f\x93\x8a Jami: {len(collected)} qism, {total_chars} belgi"
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=TEXTS[lang]["pdf_done_btn"], callback_data="pdf_create")],
-        [InlineKeyboardButton(text=TEXTS[lang]["pdf_more_btn"], callback_data="pdf_more")]
+    prompt_ids = data.get("pdf_prompt_ids", [])
+    parts.append(msg.text)
+    msg_ids.append(msg.message_id)
+    for pid in prompt_ids:
+        try: await bot.delete_message(msg.chat.id, pid)
+        except: pass
+    total_chars = sum(len(p) for p in parts)
+    caption = T[lang]["pdf_collect"].format(parts=len(parts), chars=total_chars)
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=T[lang]["pdf_done_btn"], callback_data="pdf_create"),
+         InlineKeyboardButton(text=T[lang]["pdf_undo_btn"], callback_data="pdf_undo")]
     ])
-    prompt_msg = await message.answer(info, reply_markup=kb)
-    prompt_ids = data.get("pdf_prompt_ids", [])
-    prompt_ids.append(prompt_msg.message_id)
-    await state.update_data(pdf_prompt_ids=prompt_ids)
+    prompt = await msg.answer(caption, reply_markup=markup, parse_mode="HTML")
+    await state.update_data(pdf_parts=parts, pdf_msg_ids=msg_ids, pdf_prompt_ids=[prompt.message_id])
 
-
-@dp.callback_query(F.data == "pdf_more")
-async def pdf_more_handler(callback: CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data == "pdf_undo")
+async def pdf_undo(cb: CallbackQuery, state: FSMContext):
+    lang = await get_lang(state)
     data = await state.get_data()
-    lang = data.get("language", "uz")
-    collected = data.get("pdf_collected", [])
+    parts = data.get("pdf_parts", [])
     msg_ids = data.get("pdf_msg_ids", [])
-    prompt_ids = data.get("pdf_prompt_ids", [])
-
-    if collected:
-        collected.pop()
+    if not parts:
+        await cb.answer(T[lang]["pdf_empty"])
+        return
+    parts.pop()
     if msg_ids:
-        last_msg_id = msg_ids.pop()
-        try:
-            await bot.delete_message(callback.message.chat.id, last_msg_id)
-        except:
-            pass
-    try:
-        await callback.message.delete()
-    except:
-        pass
-    if prompt_ids:
-        prompt_ids.pop()
-
-    await state.update_data(pdf_collected=collected, pdf_msg_ids=msg_ids, pdf_prompt_ids=prompt_ids)
-    await callback.answer()
-
-    total_chars = sum(len(t) for t in collected)
-    status = f" | {len(collected)} qism, {total_chars} belgi" if collected else ""
-    await callback.message.answer(TEXTS[lang]["pdf_cleared"] + status)
-
+        try: await bot.delete_message(cb.message.chat.id, msg_ids.pop())
+        except: pass
+    try: await cb.message.delete()
+    except: pass
+    await state.update_data(pdf_parts=parts, pdf_msg_ids=msg_ids, pdf_prompt_ids=[])
+    await cb.answer()
+    if parts:
+        total_chars = sum(len(p) for p in parts)
+        caption = T[lang]["pdf_collect"].format(parts=len(parts), chars=total_chars)
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=T[lang]["pdf_done_btn"], callback_data="pdf_create"),
+             InlineKeyboardButton(text=T[lang]["pdf_undo_btn"], callback_data="pdf_undo")]
+        ])
+        p = await cb.message.answer(caption, reply_markup=markup, parse_mode="HTML")
+        await state.update_data(pdf_prompt_ids=[p.message_id])
+    else:
+        await cb.message.answer(T[lang]["pdf_cleared"])
 
 @dp.callback_query(F.data == "pdf_create")
-async def pdf_create_handler(callback: CallbackQuery, state: FSMContext):
+async def pdf_create(cb: CallbackQuery, state: FSMContext):
+    lang = await get_lang(state)
     data = await state.get_data()
-    lang = data.get("language", "uz")
-    collected = data.get("pdf_collected", [])
+    parts = data.get("pdf_parts", [])
     prompt_ids = data.get("pdf_prompt_ids", [])
-
-    for pid in prompt_ids:
-        try:
-            await bot.delete_message(callback.message.chat.id, pid)
-        except:
-            pass
-    try:
-        await callback.message.delete()
-    except:
-        pass
-
-    if not collected:
-        await callback.answer("Matn yoq!")
+    if not parts:
+        await cb.answer(T[lang]["pdf_empty"])
         return
-
-    await callback.answer()
-    full_text = "\n".join(collected)
-    wait_msg = await callback.message.answer(TEXTS[lang]["pdf_processing"])
-
+    for pid in prompt_ids:
+        try: await bot.delete_message(cb.message.chat.id, pid)
+        except: pass
+    try: await cb.message.delete()
+    except: pass
+    await cb.answer()
+    full_text = "\n".join(parts)
+    wait = await cb.message.answer(T[lang]["pdf_process"])
     try:
         pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.set_auto_page_break(auto=True, margin=20)
         pdf.add_page()
         pdf.set_margins(20, 20, 20)
-
-        font_paths = [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-        ]
-        font_loaded = False
-        for font_path in font_paths:
-            if os.path.exists(font_path):
-                pdf.add_font("UniFont", "", font_path, uni=True)
-                pdf.set_font("UniFont", size=12)
-                font_loaded = True
-                break
-
-        if not font_loaded:
-            import unicodedata
-            def to_ascii(s):
-                return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
-            full_text = to_ascii(full_text)
-            pdf.set_font("Helvetica", size=12)
-
-        pdf.set_font_size(16)
-        pdf.cell(0, 10, "Document", ln=True, align="C")
-        pdf.ln(5)
-        pdf.set_font_size(12)
+        uni = setup_pdf_font(pdf, 12)
+        if not uni:
+            full_text = unicodedata.normalize("NFKD", full_text).encode("ascii", "ignore").decode("ascii")
+        pdf.set_font_size(20)
+        pdf.set_text_color(30, 30, 30)
+        pdf.cell(0, 12, "Document", ln=True, align="C")
+        pdf.ln(2)
+        pdf.set_draw_color(80, 80, 80)
+        pdf.set_line_width(0.4)
         pdf.line(20, pdf.get_y(), 190, pdf.get_y())
-        pdf.ln(8)
-
+        pdf.ln(4)
+        pdf.set_font_size(9)
+        pdf.set_text_color(130, 130, 130)
+        pdf.cell(0, 6, datetime.now().strftime("%d.%m.%Y %H:%M"), ln=True, align="R")
+        pdf.ln(4)
+        pdf.set_font_size(11)
+        pdf.set_text_color(30, 30, 30)
         for line in full_text.split("\n"):
-            pdf.multi_cell(0, 8, line if line else " ")
-
+            pdf.multi_cell(0, 7, line if line else " ")
+        pdf.set_y(-15)
+        pdf.set_font_size(9)
+        pdf.set_text_color(160, 160, 160)
+        pdf.cell(0, 10, f"Page {pdf.page_no()}", align="C")
         buf = io.BytesIO()
         pdf.output(buf)
         buf.seek(0)
-        await wait_msg.delete()
-        doc = BufferedInputFile(buf.read(), filename="document.pdf")
-        await callback.message.answer_document(doc, caption=TEXTS[lang]["pdf_success"])
-        await state.update_data(pdf_collected=[], pdf_msg_ids=[], pdf_prompt_ids=[])
-        await callback.message.answer(TEXTS[lang]["pdf_prompt"])
-
+        await wait.delete()
+        await cb.message.answer_document(BufferedInputFile(buf.read(), "document.pdf"), caption=T[lang]["pdf_success"])
+        await state.update_data(pdf_parts=[], pdf_msg_ids=[], pdf_prompt_ids=[])
+        await cb.message.answer(T[lang]["pdf_welcome"], reply_markup=kb_back(lang), parse_mode="HTML")
     except Exception as e:
-        logging.error(f"PDF xatosi: {e}")
-        try:
-            await wait_msg.delete()
-        except:
-            pass
-        await callback.message.answer(TEXTS[lang]["pdf_error"])
+        log.error(f"PDF: {e}")
+        try: await wait.delete()
+        except: pass
+        await cb.message.answer(T[lang]["pdf_error"])
 
-    except:
-        pass
-    if prompt_ids:
-        prompt_ids.pop()
+# TTS
+@dp.message(F.text.in_(["\U0001f399 Matndan Ovoz", "\U0001f399 \u0422\u0435\u043a\u0441\u0442 \u0432 \u0413\u043e\u043b\u043e\u0441", "\U0001f399 Text to Speech"]))
+async def tts_start(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    lang = await get_lang(state)
+    await state.set_state(S.tts)
+    await msg.answer(T[lang]["tts_welcome"], reply_markup=kb_back(lang), parse_mode="HTML")
 
-    await state.update_data(pdf_collected=collected, pdf_msg_ids=msg_ids, pdf_prompt_ids=prompt_ids)
-    await callback.answer()
-
-    total_chars = sum(len(t) for t in collected)
-    status = f"\n📊 Jami: {len(collected)} qism, {total_chars} belgi" if collected else ""
-    await callback.message.answer(TEXTS[lang]["pdf_cleared"] + status)
-
-
-@dp.callback_query(F.data == "pdf_create")
-async def pdf_create_handler(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    lang = data.get("language", "uz")
-    collected = data.get("pdf_collected", [])
-    prompt_ids = data.get("pdf_prompt_ids", [])
-
-    # Barcha prompt xabarlarini o'chiramiz
-    for pid in prompt_ids:
-        try:
-            await bot.delete_message(callback.message.chat.id, pid)
-        except:
-            pass
+@dp.message(S.tts, F.text)
+async def tts_create(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    if msg.text in ["\U0001f519 Orqaga", "\U0001f519 \u041d\u0430\u0437\u0430\u0434", "\U0001f519 Back"]: return
+    lang = await get_lang(state)
+    wait = await msg.answer(T[lang]["tts_process"])
     try:
-        await callback.message.delete()
-    except:
-        pass
+        lang_map = {"uz": "tr", "ru": "ru", "en": "en"}
+        def _make():
+            tts = gTTS(text=msg.text, lang=lang_map.get(lang, "en"))
+            b = io.BytesIO()
+            tts.write_to_fp(b)
+            b.seek(0)
+            return b.read()
+        audio = await asyncio.get_running_loop().run_in_executor(None, _make)
+        await wait.delete()
+        await msg.answer_audio(BufferedInputFile(audio, "voice.mp3"), caption=T[lang]["tts_success"])
+    except Exception as e:
+        log.error(f"TTS: {e}")
+        try: await wait.delete()
+        except: pass
+        await msg.answer(T[lang]["tts_error"])
 
-    if not collected:
-        await callback.answer("❌ Matn yo'q!")
-        return
+# EXCEL
+@dp.message(F.text.in_(["\U0001f4ca Excel"]))
+async def excel_start(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    lang = await get_lang(state)
+    await state.set_state(S.excel)
+    await msg.answer(T[lang]["excel_welcome"], reply_markup=kb_back(lang), parse_mode="HTML")
 
-    await callback.answer()
-    full_text = "\n".join(collected)
-    wait_msg = await callback.message.answer(TEXTS[lang]["pdf_processing"])
-
+@dp.message(S.excel, F.text)
+async def excel_create(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    if msg.text in ["\U0001f519 Orqaga", "\U0001f519 \u041d\u0430\u0437\u0430\u0434", "\U0001f519 Back"]: return
+    lang = await get_lang(state)
+    wait = await msg.answer(T[lang]["excel_process"])
     try:
-        pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.add_page()
-        pdf.set_margins(20, 20, 20)
-
-        font_paths = [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-        ]
-        font_loaded = False
-        for font_path in font_paths:
-            if os.path.exists(font_path):
-                pdf.add_font("UniFont", "", font_path, uni=True)
-                pdf.set_font("UniFont", size=12)
-                font_loaded = True
-                break
-
-        if not font_loaded:
-            import unicodedata
-            def to_ascii(s):
-                return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
-            full_text = to_ascii(full_text)
-            pdf.set_font("Helvetica", size=12)
-
-        pdf.set_font_size(16)
-        pdf.cell(0, 10, "Document", ln=True, align="C")
-        pdf.ln(5)
-        pdf.set_font_size(12)
-        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
-        pdf.ln(8)
-
-        for line in full_text.split("\n"):
-            pdf.multi_cell(0, 8, line if line else " ")
-
+        rows = []
+        for line in msg.text.strip().split("\n"):
+            line = line.strip()
+            if not line: continue
+            if "," in line: row = [c.strip() for c in line.split(",")]
+            elif "\t" in line: row = [c.strip() for c in line.split("\t")]
+            else: row = [line]
+            rows.append(row)
         buf = io.BytesIO()
-        pdf.output(buf)
+        buf.write(codecs.BOM_UTF8)
+        s = io.StringIO()
+        csv.writer(s).writerows(rows)
+        buf.write(s.getvalue().encode("utf-8"))
         buf.seek(0)
-        await wait_msg.delete()
-
-        doc = BufferedInputFile(buf.read(), filename="document.pdf")
-        await callback.message.answer_document(doc, caption=TEXTS[lang]["pdf_success"])
-
-        # Stateni tozalaymiz
-        await state.update_data(pdf_collected=[], pdf_msg_ids=[], pdf_prompt_ids=[])
-        await callback.message.answer(TEXTS[lang]["pdf_prompt"])
-
+        await wait.delete()
+        await msg.answer_document(BufferedInputFile(buf.read(), "data.csv"), caption=T[lang]["excel_success"])
     except Exception as e:
-        logging.error(f"PDF xatosi: {e}")
-        try:
-            await wait_msg.delete()
-        except:
-            pass
-        await callback.message.answer(TEXTS[lang]["pdf_error"])
+        log.error(f"Excel: {e}")
+        try: await wait.delete()
+        except: pass
+        await msg.answer(T[lang]["excel_error"])
 
-@dp.message(UserState.tts_waiting, F.text)
-async def generate_tts(message: Message, state: FSMContext):
-    if await check_and_notify_subscription(message, state):
-        return
+# WATERMARK
+@dp.message(F.text.in_(["\U0001f5bc Rasmga Matn", "\U0001f5bc \u0422\u0435\u043a\u0441\u0442 \u043d\u0430 \u0424\u043e\u0442\u043e", "\U0001f5bc Image Text"]))
+async def wm_start(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    lang = await get_lang(state)
+    await state.set_state(S.wm_photo)
+    await state.update_data(wm_photo_id=None)
+    await msg.answer(T[lang]["wm_welcome"], reply_markup=kb_back(lang), parse_mode="HTML")
+
+@dp.message(S.wm_photo, F.photo)
+async def wm_got_photo(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    lang = await get_lang(state)
+    await state.update_data(wm_photo_id=msg.photo[-1].file_id)
+    await state.set_state(S.wm_text)
+    await msg.answer(T[lang]["wm_got_photo"], parse_mode="HTML")
+
+@dp.message(S.wm_photo, ~F.photo & ~F.text)
+async def wm_wrong(msg: Message, state: FSMContext):
+    lang = await get_lang(state)
+    await msg.answer(T[lang]["wm_only_photo"], parse_mode="HTML")
+
+@dp.message(S.wm_text, F.text)
+async def wm_apply(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    if msg.text in ["\U0001f519 Orqaga", "\U0001f519 \u041d\u0430\u0437\u0430\u0434", "\U0001f519 Back"]: return
+    lang = await get_lang(state)
     data = await state.get_data()
-    lang = data.get("language", "uz")
-    text = message.text or ""
-    if text.startswith("/"):
+    photo_id = data.get("wm_photo_id")
+    if not photo_id:
+        await msg.answer(T[lang]["wm_no_photo"])
+        await state.set_state(S.wm_photo)
         return
-    if not text:
-        await message.answer(TEXTS[lang]["tts_prompt"])
-        return
-    wait_msg = await message.answer(TEXTS[lang]["tts_processing"])
+    wait = await msg.answer(T[lang]["wm_process"])
     try:
-        audio_bytes = await asyncio.get_running_loop().run_in_executor(None, make_tts, text, lang)
-        audio_file = BufferedInputFile(audio_bytes, filename="voice.mp3")
-        await wait_msg.delete()
-        await message.answer_audio(audio_file, caption=TEXTS[lang]["tts_success"])
-        await message.answer(TEXTS[lang]["tts_prompt"])
+        file = await bot.get_file(photo_id)
+        buf = io.BytesIO()
+        await bot.download_file(file.file_path, buf)
+        buf.seek(0)
+        img = Image.open(buf).convert("RGBA")
+        w, h = img.size
+        layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        font_size = max(24, w // 18)
+        font = get_font(font_size)
+        bbox = draw.textbbox((0, 0), msg.text, font=font)
+        tw, th = bbox[2]-bbox[0], bbox[3]-bbox[1]
+        x, y = (w-tw)//2, (h-th)//2
+        draw.text((x+3, y+3), msg.text, font=font, fill=(0,0,0,100))
+        draw.text((x, y), msg.text, font=font, fill=(255,255,255,210))
+        result = Image.alpha_composite(img, layer).convert("RGB")
+        out = io.BytesIO()
+        result.save(out, format="JPEG", quality=92)
+        out.seek(0)
+        await wait.delete()
+        await msg.answer_photo(BufferedInputFile(out.read(), "image.jpg"), caption=T[lang]["wm_success"])
+        await state.update_data(wm_photo_id=None)
+        await state.set_state(S.wm_photo)
+        await msg.answer(T[lang]["wm_welcome"], parse_mode="HTML")
     except Exception as e:
-        logging.error(f"TTS xatosi: {e}")
-        try:
-            await wait_msg.delete()
-        except:
-            pass
-        await message.answer(TEXTS[lang]["tts_error"])
+        log.error(f"Watermark: {e}")
+        try: await wait.delete()
+        except: pass
+        await msg.answer(T[lang]["wm_error"])
 
 async def main():
-    print("🤖 AI Javobchi bot ishga tushdi!")
+    log.info("Bot ishga tushdi!")
     await dp.start_polling(bot, drop_pending_updates=True)
 
 if __name__ == "__main__":

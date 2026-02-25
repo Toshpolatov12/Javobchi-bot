@@ -407,12 +407,13 @@ async def cmd_start(msg: Message, state: FSMContext):
 
 @dp.message(S.lang)
 async def choose_lang(msg: Message, state: FSMContext):
+    # Faqat bayroq emoji orqali til tanlanadi
     t = msg.text or ""
-    if "\U0001f1fa\U0001f1ff" in t or "O'zbek" in t: lang = "uz"
-    elif "\U0001f1f7\U0001f1fa" in t or "\u0420\u0443\u0441" in t: lang = "ru"
-    elif "\U0001f1ec\U0001f1e7" in t or "English" in t: lang = "en"
+    if "\U0001f1fa\U0001f1ff" in t: lang = "uz"
+    elif "\U0001f1f7\U0001f1fa" in t: lang = "ru"
+    elif "\U0001f1ec\U0001f1e7" in t: lang = "en"
     else:
-        await msg.answer("Iltimos, tilni tanlang:", reply_markup=kb_lang())
+        await msg.answer("Iltimos, til tugmasini bosing:", reply_markup=kb_lang())
         return
     await state.update_data(language=lang)
     uid = str(msg.from_user.id)
@@ -442,7 +443,7 @@ async def go_back(msg: Message, state: FSMContext):
     if cur == S.lang:
         return
     lang = await get_lang(state)
-    await state.update_data(chat_history=[], pdf_parts=[], pdf_msg_ids=[], pdf_prompt_ids=[], wm_photo_id=None)
+    await state.update_data(chat_history=[], pdf_parts=[], pdf_msg_ids=[], pdf_prompt_ids=[], wm_photo_id=None, weather=None)
     await state.set_state(S.menu)
     await msg.answer(T[lang]["welcome"].format(name=msg.from_user.first_name), reply_markup=kb_main(lang), parse_mode="HTML")
 
@@ -952,9 +953,16 @@ async def get_weather_by_coords(lat: float, lon: float):
 async def weather_start(msg: Message, state: FSMContext):
     if not await check_sub(msg, state): return
     lang = await get_lang(state)
+    await state.clear()
+    await state.update_data(language=lang)
     await state.set_state(S.weather)
+    loc_text = {
+        "uz": "\U0001f4cd Joylashuvimni yuborish",
+        "ru": "\U0001f4cd \u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0433\u0435\u043e\u043b\u043e\u043a\u0430\u0446\u0438\u044e",
+        "en": "\U0001f4cd Send my location"
+    }.get(lang, "\U0001f4cd Send my location")
     kb = ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="\U0001f4cd Joylashuvimni yuborish", request_location=True)],
+        [KeyboardButton(text=loc_text, request_location=True)],
         [KeyboardButton(text=T[lang]["back_btn"])]
     ], resize_keyboard=True)
     await msg.answer(T[lang]["weather_welcome"], reply_markup=kb, parse_mode="HTML")

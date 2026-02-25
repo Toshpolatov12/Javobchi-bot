@@ -33,6 +33,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 ADMIN_ID       = int(os.environ.get("ADMIN_ID", "7189342638"))
 CHANNEL        = "@uzinnotech"
 DB_FILE        = "users_db.json"
+WEATHER_KEY    = os.environ.get("WEATHER_API_KEY", "")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -68,6 +69,7 @@ class S(StatesGroup):
     excel     = State()
     wm_photo  = State()
     wm_text   = State()
+    weather   = State()
 
 T = {
     "uz": {
@@ -116,6 +118,11 @@ T = {
         "wm_error":     "\u274c Xatolik yuz berdi.",
         "wm_no_photo":  "\u26a0\ufe0f Avval rasm yuboring!",
         "wm_only_photo":"\u26a0\ufe0f Faqat rasm yuboring.",
+        "weather_btn":   "\U0001f324 Ob-havo",
+        "weather_welcome":"\U0001f324 <b>Ob-havo</b>!\n\n\U0001f4cd Joylashuvingizni yuboring yoki shahar nomini yozing:\n\U0001f4cc Orqaga: <b>\U0001f519 Orqaga</b>",
+        "weather_loading":"\u23f3 Ob-havo ma'lumoti olinmoqda...",
+        "weather_error": "\u274c Shahar topilmadi. To'g'ri nom yozing.",
+        "weather_api_err":"\u274c Ob-havo xizmati ishlamayapti. Keyinroq urinib ko'ring.",
     },
     "ru": {
         "sub_msg":      "\u26a0\ufe0f \u0414\u043b\u044f \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u0438\u044f \u043f\u043e\u0434\u043f\u0438\u0448\u0438\u0442\u0435\u0441\u044c \u043d\u0430 \u043a\u0430\u043d\u0430\u043b!",
@@ -163,6 +170,11 @@ T = {
         "wm_error":     "\u274c \u041e\u0448\u0438\u0431\u043a\u0430.",
         "wm_no_photo":  "\u26a0\ufe0f \u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u043e\u0442\u043f\u0440\u0430\u0432\u044c\u0442\u0435 \u0444\u043e\u0442\u043e!",
         "wm_only_photo":"\u26a0\ufe0f \u041e\u0442\u043f\u0440\u0430\u0432\u044c\u0442\u0435 \u0442\u043e\u043b\u044c\u043a\u043e \u0444\u043e\u0442\u043e.",
+        "weather_btn":   "\U0001f324 \u041f\u043e\u0433\u043e\u0434\u0430",
+        "weather_welcome":"\U0001f324 <b>\u041f\u043e\u0433\u043e\u0434\u0430</b>!\n\n\U0001f4cd \u041e\u0442\u043f\u0440\u0430\u0432\u044c\u0442\u0435 \u0433\u0435\u043e\u043b\u043e\u043a\u0430\u0446\u0438\u044e \u0438\u043b\u0438 \u043d\u0430\u043f\u0438\u0448\u0438\u0442\u0435 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u0433\u043e\u0440\u043e\u0434\u0430.",
+        "weather_loading":"\u23f3 \u041f\u043e\u043b\u0443\u0447\u0430\u044e \u0434\u0430\u043d\u043d\u044b\u0435...",
+        "weather_error": "\u274c \u0413\u043e\u0440\u043e\u0434 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d.",
+        "weather_api_err":"\u274c \u0421\u0435\u0440\u0432\u0438\u0441 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d.",
     },
     "en": {
         "sub_msg":      "\u26a0\ufe0f Subscribe to our channel to use the bot!",
@@ -210,6 +222,11 @@ T = {
         "wm_error":     "\u274c An error occurred.",
         "wm_no_photo":  "\u26a0\ufe0f Send a photo first!",
         "wm_only_photo":"\u26a0\ufe0f Please send a photo only.",
+        "weather_btn":   "\U0001f324 Weather",
+        "weather_welcome":"\U0001f324 <b>Weather</b>!\n\n\U0001f4cd Send your location or type a city name.",
+        "weather_loading":"\u23f3 Getting weather data...",
+        "weather_error": "\u274c City not found. Try again.",
+        "weather_api_err":"\u274c Weather service unavailable.",
     }
 }
 
@@ -226,7 +243,7 @@ def kb_main(lang):
         [KeyboardButton(text=T[lang]["ai_btn"])],
         [KeyboardButton(text=T[lang]["qr_btn"]), KeyboardButton(text=T[lang]["pdf_btn"])],
         [KeyboardButton(text=T[lang]["tts_btn"]), KeyboardButton(text=T[lang]["excel_btn"])],
-        [KeyboardButton(text=T[lang]["wm_btn"])]
+        [KeyboardButton(text=T[lang]["wm_btn"]), KeyboardButton(text=T[lang]["weather_btn"])]
     ], resize_keyboard=True)
 
 def kb_back(lang):
@@ -820,6 +837,152 @@ async def wm_apply(msg: Message, state: FSMContext):
         try: await wait.delete()
         except: pass
         await msg.answer(T[lang]["wm_error"])
+
+# ─── WEATHER ─────────────────────────────────────────────────────────────────
+WEATHER_EMOJIS = {
+    "Clear": "\u2600\ufe0f", "Clouds": "\u26c5", "Rain": "\U0001f327\ufe0f",
+    "Drizzle": "\U0001f327\ufe0f", "Thunderstorm": "\u26a1", "Snow": "\u2744\ufe0f",
+    "Mist": "\U0001f32b\ufe0f", "Fog": "\U0001f32b\ufe0f", "Haze": "\U0001f32b\ufe0f",
+    "Smoke": "\U0001f32b\ufe0f", "Dust": "\U0001f32b\ufe0f", "Sand": "\U0001f32b\ufe0f",
+    "Ash": "\U0001f32b\ufe0f", "Squall": "\U0001f4a8", "Tornado": "\U0001f32a\ufe0f"
+}
+
+WIND_DIR = {
+    "uz": ["Shimol", "Shimoli-sharq", "Sharq", "Janubi-sharq", "Janub", "Janubi-g'arb", "G'arb", "Shimoli-g'arb"],
+    "ru": ["\u0421", "\u0421\u0412", "\u0412", "\u042e\u0412", "\u042e", "\u042e\u0417", "\u0417", "\u0421\u0417"],
+    "en": ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+}
+
+def wind_direction(deg, lang):
+    dirs = WIND_DIR.get(lang, WIND_DIR["en"])
+    return dirs[round(deg / 45) % 8]
+
+def format_weather(data, lang, city_override=None):
+    city    = city_override or data.get("name", "")
+    country = data.get("sys", {}).get("country", "")
+    temp    = round(data["main"]["temp"])
+    feels   = round(data["main"]["feels_like"])
+    hum     = data["main"]["humidity"]
+    press   = data["main"]["pressure"]
+    wind_s  = round(data["wind"]["speed"])
+    wind_d  = wind_direction(data["wind"].get("deg", 0), lang)
+    vis     = data.get("visibility", 0) // 1000
+    weather = data["weather"][0]
+    desc    = weather["description"].capitalize()
+    main_w  = weather["main"]
+    emoji   = WEATHER_EMOJIS.get(main_w, "\U0001f324")
+
+    sunrise = datetime.fromtimestamp(data["sys"]["sunrise"]).strftime("%H:%M")
+    sunset  = datetime.fromtimestamp(data["sys"]["sunset"]).strftime("%H:%M")
+
+    if lang == "uz":
+        return (
+            f"{emoji} <b>{city}, {country}</b>\n"
+            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+            f"\U0001f321\ufe0f Harorat: <b>{temp}°C</b> (his qilish: {feels}°C)\n"
+            f"\U0001f4ac Holat: <b>{desc}</b>\n"
+            f"\U0001f4a7 Namlik: <b>{hum}%</b>\n"
+            f"\U0001f4a8 Shamol: <b>{wind_s} m/s</b> ({wind_d})\n"
+            f"\U0001f321\ufe0f Bosim: <b>{press} hPa</b>\n"
+            f"\U0001f440 Ko'rinish: <b>{vis} km</b>\n"
+            f"\u2600\ufe0f Quyosh: {sunrise} \u2015 {sunset}\n"
+            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+            f"\U0001f557 {datetime.now().strftime('%H:%M, %d.%m.%Y')}"
+        )
+    elif lang == "ru":
+        return (
+            f"{emoji} <b>{city}, {country}</b>\n"
+            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+            f"\U0001f321\ufe0f \u0422\u0435\u043c\u043f\u0435\u0440\u0430\u0442\u0443\u0440\u0430: <b>{temp}°C</b> (\u043e\u0449\u0443\u0449\u0430\u0435\u0442\u0441\u044f: {feels}°C)\n"
+            f"\U0001f4ac \u0421\u043e\u0441\u0442\u043e\u044f\u043d\u0438\u0435: <b>{desc}</b>\n"
+            f"\U0001f4a7 \u0412\u043b\u0430\u0436\u043d\u043e\u0441\u0442\u044c: <b>{hum}%</b>\n"
+            f"\U0001f4a8 \u0412\u0435\u0442\u0435\u0440: <b>{wind_s} \u043c/\u0441</b> ({wind_d})\n"
+            f"\U0001f321\ufe0f \u0414\u0430\u0432\u043b\u0435\u043d\u0438\u0435: <b>{press} \u0433\u041f\u0430</b>\n"
+            f"\U0001f440 \u0412\u0438\u0434\u0438\u043c\u043e\u0441\u0442\u044c: <b>{vis} \u043a\u043c</b>\n"
+            f"\u2600\ufe0f \u0420\u0430\u0441\u0441\u0432\u0435\u0442: {sunrise} \u2015 {sunset}\n"
+            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+            f"\U0001f557 {datetime.now().strftime('%H:%M, %d.%m.%Y')}"
+        )
+    else:
+        return (
+            f"{emoji} <b>{city}, {country}</b>\n"
+            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+            f"\U0001f321\ufe0f Temperature: <b>{temp}°C</b> (feels like {feels}°C)\n"
+            f"\U0001f4ac Condition: <b>{desc}</b>\n"
+            f"\U0001f4a7 Humidity: <b>{hum}%</b>\n"
+            f"\U0001f4a8 Wind: <b>{wind_s} m/s</b> ({wind_d})\n"
+            f"\U0001f321\ufe0f Pressure: <b>{press} hPa</b>\n"
+            f"\U0001f440 Visibility: <b>{vis} km</b>\n"
+            f"\u2600\ufe0f Sunrise: {sunrise} \u2015 {sunset}\n"
+            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+            f"\U0001f557 {datetime.now().strftime('%H:%M, %d.%m.%Y')}"
+        )
+
+async def get_weather_by_city(city: str):
+    try:
+        async with aiohttp.ClientSession() as sess:
+            r = await sess.get(
+                "https://api.openweathermap.org/data/2.5/weather",
+                params={"q": city, "appid": WEATHER_KEY, "units": "metric", "lang": "ru"},
+                timeout=aiohttp.ClientTimeout(total=10)
+            )
+            if r.status == 200:
+                return await r.json()
+            return None
+    except Exception as e:
+        log.error(f"Weather city error: {e}")
+        return None
+
+async def get_weather_by_coords(lat: float, lon: float):
+    try:
+        async with aiohttp.ClientSession() as sess:
+            r = await sess.get(
+                "https://api.openweathermap.org/data/2.5/weather",
+                params={"lat": lat, "lon": lon, "appid": WEATHER_KEY, "units": "metric", "lang": "ru"},
+                timeout=aiohttp.ClientTimeout(total=10)
+            )
+            if r.status == 200:
+                return await r.json()
+            return None
+    except Exception as e:
+        log.error(f"Weather coords error: {e}")
+        return None
+
+@dp.message(F.text.in_(["\U0001f324 Ob-havo", "\U0001f324 \u041f\u043e\u0433\u043e\u0434\u0430", "\U0001f324 Weather"]))
+async def weather_start(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    lang = await get_lang(state)
+    await state.set_state(S.weather)
+    kb = ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="\U0001f4cd Joylashuvimni yuborish", request_location=True)],
+        [KeyboardButton(text=T[lang]["back_btn"])]
+    ], resize_keyboard=True)
+    await msg.answer(T[lang]["weather_welcome"], reply_markup=kb, parse_mode="HTML")
+
+@dp.message(S.weather, F.location)
+async def weather_by_location(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    lang = await get_lang(state)
+    wait = await msg.answer(T[lang]["weather_loading"])
+    data = await get_weather_by_coords(msg.location.latitude, msg.location.longitude)
+    await wait.delete()
+    if data:
+        await msg.answer(format_weather(data, lang), parse_mode="HTML")
+    else:
+        await msg.answer(T[lang]["weather_api_err"])
+
+@dp.message(S.weather, F.text)
+async def weather_by_city(msg: Message, state: FSMContext):
+    if not await check_sub(msg, state): return
+    if msg.text in ["\U0001f519 Orqaga", "\U0001f519 \u041d\u0430\u0437\u0430\u0434", "\U0001f519 Back"]: return
+    lang = await get_lang(state)
+    wait = await msg.answer(T[lang]["weather_loading"])
+    data = await get_weather_by_city(msg.text.strip())
+    await wait.delete()
+    if data:
+        await msg.answer(format_weather(data, lang), parse_mode="HTML")
+    else:
+        await msg.answer(T[lang]["weather_error"])
 
 async def main():
     log.info("Bot ishga tushdi!")

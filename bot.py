@@ -18,7 +18,7 @@ from PIL import Image, ImageDraw, ImageFont
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import (
-    Message, CallbackQuery,
+    Message, CallbackQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent,
     ReplyKeyboardMarkup, KeyboardButton,
     InlineKeyboardMarkup, InlineKeyboardButton,
     BufferedInputFile
@@ -919,7 +919,29 @@ def format_weather(data, lang, city_override=None):
             f"\U0001f557 {datetime.now().strftime('%H:%M, %d.%m.%Y')}"
         )
 
+
+CITY_ALIASES = {
+    "samarqand": "Samarkand", "toshkent": "Tashkent", "buxoro": "Bukhara",
+    "fargona": "Fergana", "namangan": "Namangan", "andijon": "Andijan",
+    "qarshi": "Karshi", "termiz": "Termez", "nukus": "Nukus",
+    "xiva": "Khiva", "urganch": "Urgench", "navoiy": "Navoi",
+    "jizzax": "Jizzakh", "guliston": "Gulistan", "denov": "Denov",
+    "moscow": "Moscow", "moskva": "Moscow", "london": "London",
+    "dubai": "Dubai", "dubay": "Dubai", "istanbul": "Istanbul",
+    "stanbul": "Istanbul", "new york": "New York", "paris": "Paris",
+    "berlin": "Berlin", "beijing": "Beijing", "tokyo": "Tokyo",
+    "seoul": "Seoul", "almaty": "Almaty", "olmaota": "Almaty",
+    "bishkek": "Bishkek", "bishkek": "Bishkek", "dushanbe": "Dushanbe",
+    "ashgabat": "Ashgabat", "ashxobod": "Ashgabat", "baku": "Baku",
+    "tbilisi": "Tbilisi", "yerevan": "Yerevan",
+}
+
+def normalize_city(name: str) -> str:
+    low = name.strip().lower()
+    return CITY_ALIASES.get(low, name.strip())
+
 async def get_weather_by_city(city: str):
+    city = normalize_city(city)
     try:
         async with aiohttp.ClientSession() as sess:
             r = await sess.get(
@@ -991,6 +1013,48 @@ async def weather_by_city(msg: Message, state: FSMContext):
         await msg.answer(format_weather(data, lang), parse_mode="HTML")
     else:
         await msg.answer(T[lang]["weather_error"])
+
+# ─── INLINE MODE ─────────────────────────────────────────────────────────────
+@dp.inline_query()
+async def inline_handler(query: InlineQuery):
+    text = query.query.strip()
+    if not text:
+        await query.answer(
+            results=[],
+            switch_pm_text="Savol yozing...",
+            switch_pm_parameter="start",
+            cache_time=1
+        )
+        return
+
+    # Groq dan javob olish
+    try:
+        reply = await ai_text_req([{"role": "user", "content": text}], "uz")
+        if not reply:
+            reply = "Xatolik yuz berdi. Qayta urinib ko'ring."
+    except Exception as e:
+        log.error(f"Inline AI error: {e}")
+        reply = "Xatolik yuz berdi."
+
+    # Javobni qisqartirish (inline uchun)
+    short = reply[:100] + "..." if len(reply) > 100 else reply
+
+    result = InlineQueryResultArticle(
+        id="1",
+        title=f"🤖 {short}",
+        description="Javobni ko'rish uchun bosing",
+        input_message_content=InputTextMessageContent(
+            message_text=f"❓ <b>{text}</b>\n\n🤖 {reply}",
+            parse_mode="HTML"
+        ),
+        thumbnail_url="https://img.icons8.com/color/96/bot.png"
+    )
+
+    await query.answer(
+        results=[result],
+        cache_time=10,
+        is_personal=True
+    )
 
 async def main():
     log.info("Bot ishga tushdi!")

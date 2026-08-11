@@ -1,5 +1,5 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from bot.locales import MESSAGES
+from bot.locales import MESSAGES, FORMAT_DESCRIPTIONS
 
 
 def get_format_keyboard(formats: list[str], lang: str) -> InlineKeyboardMarkup:
@@ -26,14 +26,27 @@ def get_format_keyboard(formats: list[str], lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def build_format_descriptions_text(formats: list[str], lang: str) -> str:
+    lines = []
+    for ext in formats:
+        emoji = _get_format_emoji(ext)
+        desc = FORMAT_DESCRIPTIONS.get(ext.lower(), {}).get(lang, "")
+        if desc:
+            lines.append(f"• <b>{emoji} {ext.upper()}</b> — {desc}")
+        else:
+            lines.append(f"• <b>{emoji} {ext.upper()}</b>")
+    return "\n".join(lines)
+
+
 def _get_format_emoji(ext: str) -> str:
     emojis = {
         "jpg": "🖼", "jpeg": "🖼", "png": "🖼", "webp": "🖼",
-        "bmp": "🖼", "tiff": "🖼", "ico": "🖼",
+        "bmp": "🖼", "tiff": "🖼", "ico": "🖼", "heic": "🖼",
         "pdf": "📕", "docx": "📘", "txt": "📝", "html": "🌐",
         "csv": "📊", "xlsx": "📗", "json": "💾", "xml": "📋",
         "yaml": "📋", "yml": "📋",
         "zip": "📦", "7z": "📦", "tar": "📦", "gz": "📦",
         "epub": "📚", "md": "📝",
+        "mp3": "🎵", "ogg": "🎙", "wav": "🎧", "m4a": "🎶"
     }
     return emojis.get(ext.lower(), "📄")

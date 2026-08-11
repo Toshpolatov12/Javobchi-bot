@@ -1,10 +1,13 @@
 import logging
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from bot.database import save_user, get_user_lang, get_all_users_count, get_recent_activities
+from aiogram.types import Message, CallbackQuery
+from bot.database import (
+    save_user, get_user_lang, get_user_lang_raw,
+    get_all_users_count, get_recent_activities
+)
 from bot.locales import MESSAGES
-from keyboards.main_menu import get_main_menu
+from keyboards.main_menu import get_main_menu, get_file_transfer_menu, get_language_keyboard
 from bot.config import ADMIN_ID
 
 logger = logging.getLogger(__name__)
@@ -13,25 +16,39 @@ router = Router()
 
 @router.message(Command("start"))
 async def start_handler(message: Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🇺🇿 O'zbekcha", callback_data="lang:uz"),
-            InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang:ru")
-        ]
-    ])
-    await message.answer(MESSAGES["uz"]["welcome"], reply_markup=kb, parse_mode="HTML")
+    user_id = message.from_user.id
+    saved_lang = await get_user_lang_raw(user_id)
+
+    if saved_lang is None:
+        # First time user: show language selection
+        await message.answer(
+            MESSAGES["uz"]["welcome_first"],
+            reply_markup=get_language_keyboard(),
+            parse_mode="HTML"
+        )
+    else:
+        # Existing user: show welcome back and main menu directly
+        lang = saved_lang if saved_lang in ["uz", "ru", "en"] else "uz"
+        await message.answer(
+            MESSAGES[lang]["welcome_back"],
+            reply_markup=get_main_menu(lang),
+            parse_mode="HTML"
+        )
 
 
 @router.callback_query(F.data.startswith("lang:"))
 async def set_lang(call: CallbackQuery):
     lang = call.data.split(":")[1]
+    if lang not in ["uz", "ru", "en"]:
+        lang = "uz"
+
     try:
         await save_user(call.from_user.id, call.from_user.username, call.from_user.full_name, lang)
     except Exception as e:
         logger.error(f"Error saving user: {e}")
 
     await call.message.edit_text(
-        f"✅ {'Til tanlandi!' if lang == 'uz' else 'Язык выбран!'}",
+        MESSAGES[lang]["lang_changed"],
         parse_mode="HTML"
     )
     await call.message.answer(
@@ -75,25 +92,67 @@ async def stats_handler(message: Message):
         await message.answer(f"Error: {e}")
 
 
-# Handle menu button presses
-@router.message(F.text.in_(["📁 Konvertatsiya", "📁 Конвертация"]))
-async def convert_menu(message: Message):
-    lang = await get_user_lang(message.from_user.id)
-    await message.answer(MESSAGES[lang]["send_file"])
+# --- Persistent Menu Button Handlers ---
 
-
-@router.message(F.text.in_(["🌐 Til", "🌐 Язык"]))
+# 🌐 Language Selection
+@router.message(F.text.in_([
+    "🌐 Til / Language",
+    "🌐 Til", "🌐 Язык", "🌐 Language"
+]))
 async def lang_menu(message: Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🇺🇿 O'zbekcha", callback_data="lang:uz"),
-            InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang:ru")
-        ]
-    ])
-    await message.answer("🌐 Tilni tanlang / Выберите язык:", reply_markup=kb)
+    lang = await get_user_lang(message.from_user.id)
+    await message.answer(
+        MESSAGES[lang]["select_lang"],
+        reply_markup=get_language_keyboard(),
+        parse_mode="HTML"
+    )
 
 
-@router.message(F.text.in_(["❓ Yordam", "❓ Помощь"]))
+# 🤖 AI Mode
+@router.message(F.text.in_([
+    "🤖 AI rejim", "🤖 AI режим", "🤖 AI Mode",
+    "🤖 AI Suhbat", "🤖 AI Чат"
+]))
+async def ai_menu(message: Message):
+    lang = await get_user_lang(message.from_user.id)
+    await message.answer(
+        MESSAGES[lang]["ai_mode"],
+        reply_markup=get_main_menu(lang),
+        parse_mode="HTML"
+    )
+
+
+# 📁 File Transfer Section (Opens Submenu)
+@router.message(F.text.in_([
+    "📁 Fayl transfer", "📁 Конвертация файлов", "📁 File Transfer",
+    "📁 Konvertatsiya", "📁 Конвертация"
+]))
+async def file_transfer_menu_handler(message: Message):
+    lang = await get_user_lang(message.from_user.id)
+    await message.answer(
+        MESSAGES[lang]["file_transfer_menu"],
+        reply_markup=get_file_transfer_menu(lang),
+        parse_mode="HTML"
+    )
+
+
+# ❓ Help (Inside File Transfer Submenu or Main Menu)
+@router.message(F.text.in_([
+    "❓ Yordam", "❓ Помощь", "❓ Help"
+]))
 async def help_menu(message: Message):
     lang = await get_user_lang(message.from_user.id)
     await message.answer(MESSAGES[lang]["help_text"], parse_mode="HTML")
+
+
+# ⬅️ Back to Main Menu
+@router.message(F.text.in_([
+    "⬅️ Orqaga", "⬅️ Назад", "⬅️ Back"
+]))
+async def back_to_main_menu(message: Message):
+    lang = await get_user_lang(message.from_user.id)
+    await message.answer(
+        MESSAGES[lang]["main_menu"],
+        reply_markup=get_main_menu(lang),
+        parse_mode="HTML"
+    )

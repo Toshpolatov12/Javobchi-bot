@@ -91,12 +91,18 @@ async def get_recent_activities(limit: int = 50) -> list:
     return result if result else []
 
 
-async def get_user_lang(user_id: int) -> str:
+async def get_user_lang_raw(user_id: int) -> str | None:
+    """Returns exact saved language ('uz', 'ru', 'en') or None if user has never chosen language."""
     result = await _request(
         "get",
         f"users?id=eq.{user_id}&select=language",
         headers=_headers()
     )
-    if result and len(result) > 0:
-        return result[0].get("language", "uz")
-    return "uz"
+    if result and len(result) > 0 and result[0].get("language"):
+        return result[0].get("language")
+    return None
+
+
+async def get_user_lang(user_id: int) -> str:
+    lang = await get_user_lang_raw(user_id)
+    return lang if lang in ["uz", "ru", "en"] else "uz"

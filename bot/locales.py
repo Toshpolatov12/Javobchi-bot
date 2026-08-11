@@ -28,6 +28,7 @@ MESSAGES = {
         "done": "✅ Tayyor!",
         "error": "❌ Xatolik yuz berdi.",
         "too_large": "❌ Fayl hajmi juda katta! Maksimum: 50MB.",
+        "gif_too_long": "❌ Faqat 8 soniya yoki undan qisqa videolarni GIF formatga aylantirish mumkin.",
         "unsupported": "❌ Bu format qo'llab-quvvatlanmaydi.\n\n💡 Formatlar ro'yxati uchun <b>❓ Yordam</b> tugmasini bosing.",
         "ai_mode": (
             "🤖 <b>AI Suhbat va Link Yuklovchi</b> rejimi faol.\n\n"
@@ -38,7 +39,7 @@ MESSAGES = {
         ),
         "ai_thinking": "⏳ AI javob tayyorlamoqda...",
         "cancel": "Bekor qilish",
-        "video_error": "❌ Bu havoladan video yuklab bo'lmadi yoki havolasi xato.",
+        "video_error": "❌ Bu havoladan video yuklab bo'lmadi (hajmi juda katta yoki havola yopiq).",
         "help_text": (
             "📖 <b>Qo'llab-quvvatlanadigan barcha formatlar ro'yxati:</b>\n\n"
             "🖼 <b>Rasmlar:</b>\n"
@@ -57,7 +58,7 @@ MESSAGES = {
             "CSV ↔ JSON\n"
             "XLSX → PDF\n\n"
             "🎥 <b>Video & Audio:</b>\n"
-            "MP4, AVI, MOV, MKV → MP3, OGG (Ovozli xabar), WAV, M4A\n\n"
+            "MP4, AVI, MOV, MKV → GIF (maks 8 soniya), MP3, OGG (Ovozli xabar), WAV, M4A\n\n"
             "💾 <b>Data formatlar:</b>\n"
             "JSON ↔ XML ↔ YAML\n\n"
             "📦 <b>Arxivlar:</b>\n"
@@ -102,6 +103,7 @@ MESSAGES = {
         "done": "✅ Готово!",
         "error": "❌ Произошла ошибка.",
         "too_large": "❌ Файл слишком большой! Максимум: 50MB.",
+        "gif_too_long": "❌ Только видео длительностью 8 секунд или менее можно конвертировать в GIF.",
         "unsupported": "❌ Формат не поддерживается.\n\n💡 Нажмите <b>❓ Помощь</b> для списка форматов.",
         "ai_mode": (
             "🤖 <b>Режим AI Чат и Загрузчик ссылок</b> активен.\n\n"
@@ -112,7 +114,7 @@ MESSAGES = {
         ),
         "ai_thinking": "⏳ AI готовит ответ...",
         "cancel": "Отмена",
-        "video_error": "❌ Не удалось скачать видео по этой ссылке.",
+        "video_error": "❌ Не удалось скачать видео по этой ссылке (слишком большой размер или приватная ссылка).",
         "help_text": (
             "📖 <b>Список всех поддерживаемых форматов:</b>\n\n"
             "🖼 <b>Изображения:</b>\n"
@@ -131,7 +133,7 @@ MESSAGES = {
             "CSV ↔ JSON\n"
             "XLSX → PDF\n\n"
             "🎥 <b>Видео и Аудио:</b>\n"
-            "MP4, AVI, MOV, MKV → MP3, OGG (Голосовое сообщение), WAV, M4A\n\n"
+            "MP4, AVI, MOV, MKV → GIF (макс 8 сек), MP3, OGG (Голосовое сообщение), WAV, M4A\n\n"
             "💾 <b>Данные:</b>\n"
             "JSON ↔ XML ↔ YAML\n\n"
             "📦 <b>Архивы:</b>\n"
@@ -176,6 +178,7 @@ MESSAGES = {
         "done": "✅ Done!",
         "error": "❌ An error occurred.",
         "too_large": "❌ File size is too large! Maximum: 50MB.",
+        "gif_too_long": "❌ Only videos 8 seconds or shorter can be converted to GIF format.",
         "unsupported": "❌ Unsupported format.\n\n💡 Click <b>❓ Help</b> for supported formats list.",
         "ai_mode": (
             "🤖 <b>AI Chat & Link Downloader</b> mode active.\n\n"
@@ -186,7 +189,7 @@ MESSAGES = {
         ),
         "ai_thinking": "⏳ AI is typing...",
         "cancel": "Cancel",
-        "video_error": "❌ Could not download video from this link.",
+        "video_error": "❌ Could not download video from this link (too large or private).",
         "help_text": (
             "📖 <b>List of all supported formats:</b>\n\n"
             "🖼 <b>Images:</b>\n"
@@ -205,7 +208,7 @@ MESSAGES = {
             "CSV ↔ JSON\n"
             "XLSX → PDF\n\n"
             "🎥 <b>Video & Audio:</b>\n"
-            "MP4, AVI, MOV, MKV → MP3, OGG (Voice Message), WAV, M4A\n\n"
+            "MP4, AVI, MOV, MKV → GIF (max 8 sec), MP3, OGG (Voice Message), WAV, M4A\n\n"
             "💾 <b>Data:</b>\n"
             "JSON ↔ XML ↔ YAML\n\n"
             "📦 <b>Archives:</b>\n"
@@ -324,6 +327,11 @@ FORMAT_DESCRIPTIONS = {
         "uz": "Elektron kitob formati (e-book reader)",
         "ru": "Формат электронных книг",
         "en": "Electronic publication e-book format"
+    },
+    "gif": {
+        "uz": "Harakatlanuvchi qisqa animatsiya (maks 8 soniya)",
+        "ru": "Анимированное короткое видео (макс 8 сек)",
+        "en": "Animated short looping clip (max 8 sec)"
     },
     "mp3": {
         "uz": "Keng tarqalgan sifatli musiqiy audio fayl",

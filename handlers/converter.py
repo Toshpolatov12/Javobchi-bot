@@ -196,11 +196,14 @@ async def convert_callback(call: CallbackQuery):
         result_file = BufferedInputFile(result_data, filename=output_name)
 
         # Send based on output type
-        if target_ext == "ogg":
-            # Send as Telegram Voice Note!
+        if target_ext == "gif":
+            # Send as Telegram GIF / Animation
+            await call.message.answer_animation(result_file)
+        elif target_ext == "ogg":
+            # Send as Telegram Voice Note
             await call.message.answer_voice(result_file)
         elif target_ext in ["mp3", "wav", "m4a"]:
-            # Send as Telegram Audio Track!
+            # Send as Telegram Audio Track
             await call.message.answer_audio(result_file)
         else:
             # Send as Document
@@ -219,6 +222,11 @@ async def convert_callback(call: CallbackQuery):
             status="success"
         )
 
+    except ValueError as ve:
+        if str(ve) == "gif_too_long":
+            await call.message.edit_text(MESSAGES[lang]["gif_too_long"])
+        else:
+            await call.message.edit_text(MESSAGES[lang]["error"])
     except Exception as e:
         logger.error(f"Conversion error {source_ext}->{target_ext}: {e}")
         await call.message.edit_text(

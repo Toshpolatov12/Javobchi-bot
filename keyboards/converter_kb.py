@@ -47,6 +47,6 @@ def _get_format_emoji(ext: str) -> str:
         "yaml": "📋", "yml": "📋",
         "zip": "📦", "7z": "📦", "tar": "📦", "gz": "📦",
         "epub": "📚", "md": "📝",
-        "mp3": "🎵", "ogg": "🎙", "wav": "🎧", "m4a": "🎶"
+        "gif": "🎞", "mp3": "🎵", "ogg": "🎙", "wav": "🎧", "m4a": "🎶"
     }
     return emojis.get(ext.lower(), "📄")

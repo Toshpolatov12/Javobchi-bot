@@ -10,7 +10,7 @@ from aiogram.types import (
 from bot.config import GEMINI_API_KEY, GROQ_API_KEY
 from bot.database import get_user_lang
 from bot.locales import MESSAGES
-from utils.link_downloader import extract_url, download_video, scrape_webpage
+from utils.link_downloader import extract_url, is_video_url, download_video, scrape_webpage
 from utils.file_helper import cleanup
 
 logger = logging.getLogger(__name__)
@@ -101,7 +101,6 @@ async def ai_mode_handler(message: Message):
 
 @router.message(F.text & ~F.text.startswith("/"))
 async def chat_handler(message: Message):
-    # Skip menu button texts
     menu_texts = [
         "📁 Fayl transfer", "📁 Конвертация файлов", "📁 File Transfer",
         "📁 Konvertatsiya", "📁 Конвертация",
@@ -118,24 +117,28 @@ async def chat_handler(message: Message):
     url = extract_url(message.text)
 
     if url:
-        # 1. Try downloading video first
-        thinking_msg = await message.answer(MESSAGES[lang]["downloading_video"])
-        video_path = await download_video(url)
+        # 1. Video URL handling
+        if is_video_url(url):
+            thinking_msg = await message.answer(MESSAGES[lang]["downloading_video"])
+            video_path = await download_video(url)
 
-        if video_path and os.path.exists(video_path):
-            try:
-                video_file = FSInputFile(video_path)
-                await message.answer_video(video_file, caption="✅ Video yuklab olindi!")
-                await thinking_msg.delete()
-            except Exception as e:
-                logger.error(f"Error sending downloaded video: {e}")
+            if video_path and os.path.exists(video_path):
+                try:
+                    video_file = FSInputFile(video_path)
+                    await message.answer_video(video_file, caption="✅ Video yuklab olindi!")
+                    await thinking_msg.delete()
+                except Exception as e:
+                    logger.error(f"Error sending downloaded video: {e}")
+                    await thinking_msg.edit_text(MESSAGES[lang]["video_error"])
+                finally:
+                    cleanup(video_path)
+            else:
+                # Video download failed (too large, private, or unavailable)
                 await thinking_msg.edit_text(MESSAGES[lang]["video_error"])
-            finally:
-                cleanup(video_path)
             return
 
-        # 2. If not a downloadable video, scrape webpage content and summarize via AI
-        await thinking_msg.edit_text(MESSAGES[lang]["scraping_web"])
+        # 2. General webpage article URL handling
+        thinking_msg = await message.answer(MESSAGES[lang]["scraping_web"])
         web_text = await scrape_webpage(url)
 
         if web_text:
@@ -149,7 +152,7 @@ async def chat_handler(message: Message):
             await thinking_msg.edit_text(MESSAGES[lang]["video_error"])
         return
 
-    # 3. No URL in message -> Standard AI Chat
+    # 3. Standard AI Chat (no URL)
     thinking_msg = await message.answer(MESSAGES[lang].get("ai_thinking", "⏳..."))
     response = await get_ai_response(message.text)
 

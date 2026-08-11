@@ -7,10 +7,10 @@ import docx
 import mammoth
 import fitz  # PyMuPDF
 from fpdf import FPDF
-from pdf2docx import Converter
 import markdown
 
 logger = logging.getLogger(__name__)
+
 
 def get_dejavu_font():
     font_path = "/tmp/DejaVuSans.ttf"
@@ -21,6 +21,7 @@ def get_dejavu_font():
         except Exception as e:
             logger.error(f"Failed to download DejaVu font: {e}")
     return font_path
+
 
 def _docx_to_txt(input_path: str, output_path: str) -> str:
     try:
@@ -33,8 +34,10 @@ def _docx_to_txt(input_path: str, output_path: str) -> str:
         logger.error(f"Error converting docx to txt: {e}")
         raise
 
+
 async def convert_docx_to_txt(input_path: str, output_path: str) -> str:
     return await asyncio.to_thread(_docx_to_txt, input_path, output_path)
+
 
 def _docx_to_html(input_path: str, output_path: str) -> str:
     try:
@@ -48,14 +51,16 @@ def _docx_to_html(input_path: str, output_path: str) -> str:
         logger.error(f"Error converting docx to html: {e}")
         raise
 
+
 async def convert_docx_to_html(input_path: str, output_path: str) -> str:
     return await asyncio.to_thread(_docx_to_html, input_path, output_path)
+
 
 def _docx_to_pdf(input_path: str, output_path: str) -> str:
     try:
         doc = docx.Document(input_path)
         text = "\n".join([para.text for para in doc.paragraphs])
-        
+
         pdf = FPDF()
         pdf.add_page()
         font_path = get_dejavu_font()
@@ -64,7 +69,7 @@ def _docx_to_pdf(input_path: str, output_path: str) -> str:
             pdf.set_font("DejaVu", size=12)
         else:
             pdf.set_font("Arial", size=12)
-        
+
         pdf.multi_cell(0, 10, text)
         pdf.output(output_path)
         return output_path
@@ -72,8 +77,10 @@ def _docx_to_pdf(input_path: str, output_path: str) -> str:
         logger.error(f"Error converting docx to pdf: {e}")
         raise
 
+
 async def convert_docx_to_pdf(input_path: str, output_path: str) -> str:
     return await asyncio.to_thread(_docx_to_pdf, input_path, output_path)
+
 
 def _pdf_to_txt(input_path: str, output_path: str) -> str:
     try:
@@ -88,8 +95,10 @@ def _pdf_to_txt(input_path: str, output_path: str) -> str:
         logger.error(f"Error converting pdf to txt: {e}")
         raise
 
+
 async def convert_pdf_to_txt(input_path: str, output_path: str) -> str:
     return await asyncio.to_thread(_pdf_to_txt, input_path, output_path)
+
 
 def _pdf_to_png(input_path: str, output_path: str) -> str:
     try:
@@ -97,7 +106,7 @@ def _pdf_to_png(input_path: str, output_path: str) -> str:
         zip_path = output_path
         if not zip_path.endswith('.zip'):
             zip_path += '.zip'
-        
+
         with zipfile.ZipFile(zip_path, 'w') as zipf:
             for i, page in enumerate(doc):
                 pix = page.get_pixmap()
@@ -110,14 +119,16 @@ def _pdf_to_png(input_path: str, output_path: str) -> str:
         logger.error(f"Error converting pdf to png: {e}")
         raise
 
+
 async def convert_pdf_to_png(input_path: str, output_path: str) -> str:
     return await asyncio.to_thread(_pdf_to_png, input_path, output_path)
+
 
 def _txt_to_pdf(input_path: str, output_path: str) -> str:
     try:
         with open(input_path, 'r', encoding='utf-8') as f:
             text = f.read()
-        
+
         pdf = FPDF()
         pdf.add_page()
         font_path = get_dejavu_font()
@@ -126,7 +137,7 @@ def _txt_to_pdf(input_path: str, output_path: str) -> str:
             pdf.set_font("DejaVu", size=12)
         else:
             pdf.set_font("Arial", size=12)
-        
+
         pdf.multi_cell(0, 10, text)
         pdf.output(output_path)
         return output_path
@@ -134,8 +145,10 @@ def _txt_to_pdf(input_path: str, output_path: str) -> str:
         logger.error(f"Error converting txt to pdf: {e}")
         raise
 
+
 async def convert_txt_to_pdf(input_path: str, output_path: str) -> str:
     return await asyncio.to_thread(_txt_to_pdf, input_path, output_path)
+
 
 def _txt_to_docx(input_path: str, output_path: str) -> str:
     try:
@@ -149,21 +162,28 @@ def _txt_to_docx(input_path: str, output_path: str) -> str:
         logger.error(f"Error converting txt to docx: {e}")
         raise
 
+
 async def convert_txt_to_docx(input_path: str, output_path: str) -> str:
     return await asyncio.to_thread(_txt_to_docx, input_path, output_path)
 
+
 def _pdf_to_docx(input_path: str, output_path: str) -> str:
     try:
-        cv = Converter(input_path)
-        cv.convert(output_path)
-        cv.close()
+        doc_pdf = fitz.open(input_path)
+        doc_word = docx.Document()
+        for page in doc_pdf:
+            text = page.get_text()
+            doc_word.add_paragraph(text)
+        doc_word.save(output_path)
         return output_path
     except Exception as e:
         logger.error(f"Error converting pdf to docx: {e}")
         raise
 
+
 async def convert_pdf_to_docx(input_path: str, output_path: str) -> str:
     return await asyncio.to_thread(_pdf_to_docx, input_path, output_path)
+
 
 def _md_to_html(input_path: str, output_path: str) -> str:
     try:
@@ -177,16 +197,15 @@ def _md_to_html(input_path: str, output_path: str) -> str:
         logger.error(f"Error converting md to html: {e}")
         raise
 
+
 async def convert_md_to_html(input_path: str, output_path: str) -> str:
     return await asyncio.to_thread(_md_to_html, input_path, output_path)
+
 
 def _md_to_pdf(input_path: str, output_path: str) -> str:
     try:
         with open(input_path, 'r', encoding='utf-8') as f:
             text = f.read()
-        # Using basic text for PDF since fpdf2 HTML rendering might be complex, 
-        # or just render text. For true HTML to PDF we might need other tools, 
-        # but we'll stick to fpdf2 multi_cell.
         pdf = FPDF()
         pdf.add_page()
         font_path = get_dejavu_font()
@@ -195,7 +214,7 @@ def _md_to_pdf(input_path: str, output_path: str) -> str:
             pdf.set_font("DejaVu", size=12)
         else:
             pdf.set_font("Arial", size=12)
-        
+
         pdf.multi_cell(0, 10, text)
         pdf.output(output_path)
         return output_path
@@ -203,14 +222,16 @@ def _md_to_pdf(input_path: str, output_path: str) -> str:
         logger.error(f"Error converting md to pdf: {e}")
         raise
 
+
 async def convert_md_to_pdf(input_path: str, output_path: str) -> str:
     return await asyncio.to_thread(_md_to_pdf, input_path, output_path)
+
 
 def _html_to_pdf(input_path: str, output_path: str) -> str:
     try:
         with open(input_path, 'r', encoding='utf-8') as f:
             text = f.read()
-        
+
         pdf = FPDF()
         pdf.add_page()
         font_path = get_dejavu_font()
@@ -219,8 +240,7 @@ def _html_to_pdf(input_path: str, output_path: str) -> str:
             pdf.set_font("DejaVu", size=12)
         else:
             pdf.set_font("Arial", size=12)
-        
-        # Simple extraction
+
         from html.parser import HTMLParser
         class HTMLFilter(HTMLParser):
             text = ""
@@ -228,13 +248,14 @@ def _html_to_pdf(input_path: str, output_path: str) -> str:
                 self.text += data
         f = HTMLFilter()
         f.feed(text)
-        
+
         pdf.multi_cell(0, 10, f.text)
         pdf.output(output_path)
         return output_path
     except Exception as e:
         logger.error(f"Error converting html to pdf: {e}")
         raise
+
 
 async def convert_html_to_pdf(input_path: str, output_path: str) -> str:
     return await asyncio.to_thread(_html_to_pdf, input_path, output_path)

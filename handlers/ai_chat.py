@@ -4,13 +4,16 @@ import hashlib
 import aiohttp
 from aiogram import Router, F
 from aiogram.types import (
-    Message, InlineQuery, InlineQueryResultArticle,
+    Message, InlineQuery, InlineQueryResultArticle, InlineQueryResultVideo,
     InputTextMessageContent, FSInputFile
 )
 from bot.config import GEMINI_API_KEY, GROQ_API_KEY
 from bot.database import get_user_lang
 from bot.locales import MESSAGES
-from utils.link_downloader import extract_url, is_video_url, download_video, scrape_webpage
+from utils.link_downloader import (
+    extract_url, is_video_url, extract_video_info,
+    download_video, scrape_webpage
+)
 from utils.file_helper import cleanup
 
 logger = logging.getLogger(__name__)
@@ -133,7 +136,6 @@ async def chat_handler(message: Message):
                 finally:
                     cleanup(video_path)
             else:
-                # Video download failed (too large, private, or unavailable)
                 await thinking_msg.edit_text(MESSAGES[lang]["video_error"])
             return
 
@@ -170,8 +172,33 @@ async def inline_ai(query: InlineQuery):
     if not query.query or len(query.query) < 3:
         return
 
-    response = await get_ai_response(query.query)
+    url = extract_url(query.query)
     result_id = hashlib.md5(query.query.encode()).hexdigest()
+
+    # 1. Inline query contains a Video URL -> Return playable inline video!
+    if url and is_video_url(url):
+        info = await extract_video_info(url)
+        if info and info.get("url"):
+            direct_url = info["url"]
+            title = info.get("title", "Video")
+            thumb = info.get("thumbnail", "https://png.pngtree.com/png-vector/20190215/ourmid/pngtree-play-video-icon-png-image_533038.jpg")
+
+            results = [
+                InlineQueryResultVideo(
+                    id=result_id,
+                    video_url=direct_url,
+                    mime_type="video/mp4",
+                    thumbnail_url=thumb,
+                    title=f"🎬 {title[:40]}",
+                    caption=f"🎬 <b>{title}</b>\n\n🔗 {url}",
+                    parse_mode="HTML"
+                )
+            ]
+            await query.answer(results, cache_time=300)
+            return
+
+    # 2. Standard text AI response in inline mode
+    response = await get_ai_response(query.query)
 
     if len(response) > 4000:
         response = response[:4000] + "..."

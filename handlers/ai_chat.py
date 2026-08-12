@@ -5,9 +5,12 @@ import aiohttp
 from aiogram import Router, F
 from aiogram.types import (
     Message, InlineQuery, InlineQueryResultArticle, InlineQueryResultVideo,
-    InputTextMessageContent, FSInputFile
+    InlineQueryResultGame, InputTextMessageContent, FSInputFile
 )
-from bot.config import GEMINI_API_KEY, GROQ_API_KEY
+from bot.config import (
+    GEMINI_API_KEY, GROQ_API_KEY,
+    SNAKE_GAME_SHORT_NAME, GAME2048_SHORT_NAME
+)
 from bot.database import get_user_lang
 from bot.locales import MESSAGES
 from utils.link_downloader import (
@@ -169,13 +172,31 @@ async def chat_handler(message: Message):
 
 @router.inline_query()
 async def inline_ai(query: InlineQuery):
-    if not query.query or len(query.query) < 3:
+    query_text = (query.query or "").strip()
+
+    # 1. EMPTY QUERY -> Return Games (Snake and 2048)
+    if not query_text:
+        games = [
+            InlineQueryResultGame(
+                id="game_snake",
+                game_short_name=SNAKE_GAME_SHORT_NAME
+            ),
+            InlineQueryResultGame(
+                id="game_2048",
+                game_short_name=GAME2048_SHORT_NAME
+            )
+        ]
+        await query.answer(games, cache_time=300)
         return
 
-    url = extract_url(query.query)
-    result_id = hashlib.md5(query.query.encode()).hexdigest()
+    # If query is too short for search/AI, return early
+    if len(query_text) < 3:
+        return
 
-    # 1. Inline query contains a Video URL -> Return playable inline video!
+    url = extract_url(query_text)
+    result_id = hashlib.md5(query_text.encode()).hexdigest()
+
+    # 2. QUERY CONTAINS VIDEO URL -> Return playable inline video!
     if url and is_video_url(url):
         info = await extract_video_info(url)
         if info and info.get("url"):
@@ -197,8 +218,8 @@ async def inline_ai(query: InlineQuery):
             await query.answer(results, cache_time=300)
             return
 
-    # 2. Standard text AI response in inline mode
-    response = await get_ai_response(query.query)
+    # 3. QUERY IS TEXT -> Return AI answer article
+    response = await get_ai_response(query_text)
 
     if len(response) > 4000:
         response = response[:4000] + "..."
@@ -209,7 +230,7 @@ async def inline_ai(query: InlineQuery):
             title="🤖 AI Javob",
             description=response[:100],
             input_message_content=InputTextMessageContent(
-                message_text=f"❓ <b>{query.query}</b>\n\n🤖 {response}",
+                message_text=f"❓ <b>{query_text}</b>\n\n🤖 {response}",
                 parse_mode="HTML"
             )
         )

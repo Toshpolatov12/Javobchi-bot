@@ -8,16 +8,17 @@ from aiogram.types import (
     InlineQueryResultGame, InputTextMessageContent, FSInputFile
 )
 from bot.config import (
-    GEMINI_API_KEY, GROQ_API_KEY,
     SNAKE_GAME_SHORT_NAME, GAME2048_SHORT_NAME
 )
-from bot.database import get_user_lang
+from bot.database import get_user_lang, log_activity
 from bot.locales import MESSAGES
 from utils.link_downloader import (
     extract_url, is_video_url, extract_video_info,
     download_video, scrape_webpage
 )
 from utils.file_helper import cleanup
+from utils.token_rotator import groq_rotator, gemini_rotator
+from bot.main import bot
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -26,7 +27,11 @@ GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
-async def get_groq_response(prompt: str, key: str) -> str:
+async def get_groq_response(prompt: str) -> str:
+    key = groq_rotator.get_key()
+    if not key:
+        return "⚠️ Groq API key sozlanmagan."
+
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json"
@@ -47,6 +52,13 @@ async def get_groq_response(prompt: str, key: str) -> str:
                 if resp.status == 200:
                     data = await resp.json()
                     return data["choices"][0]["message"]["content"]
+                elif resp.status in (429, 403):
+                    logger.warning(f"Groq 429/quota error on key: {key[:8]}... Rotating key...")
+                    groq_rotator.mark_busy()
+                    next_key = groq_rotator.get_key()
+                    if next_key and next_key != key:
+                        return await get_groq_response(prompt)
+                    return "❌ AI xizmati vaqtincha band (429 Rate limit)."
                 else:
                     error_text = await resp.text()
                     logger.error(f"Groq API error {resp.status}: {error_text[:200]}")
@@ -59,7 +71,11 @@ async def get_groq_response(prompt: str, key: str) -> str:
 
 
 async def get_gemini_response(prompt: str) -> str:
-    url = f"{GEMINI_URL}?key={GEMINI_API_KEY}"
+    key = gemini_rotator.get_key()
+    if not key:
+        return "⚠️ Gemini API key sozlanmagan."
+
+    url = f"{GEMINI_URL}?key={key}"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -74,6 +90,13 @@ async def get_gemini_response(prompt: str) -> str:
                 if resp.status == 200:
                     data = await resp.json()
                     return data["candidates"][0]["content"]["parts"][0]["text"]
+                elif resp.status in (429, 403):
+                    logger.warning(f"Gemini 429/quota error on key: {key[:8]}... Rotating key...")
+                    gemini_rotator.mark_busy()
+                    next_key = gemini_rotator.get_key()
+                    if next_key and next_key != key:
+                        return await get_gemini_response(prompt)
+                    return "❌ AI xizmati vaqtincha band (429 Rate limit)."
                 else:
                     error_text = await resp.text()
                     logger.error(f"Gemini API error {resp.status}: {error_text[:200]}")
@@ -86,11 +109,9 @@ async def get_gemini_response(prompt: str) -> str:
 
 
 async def get_ai_response(prompt: str) -> str:
-    if GROQ_API_KEY:
-        return await get_groq_response(prompt, GROQ_API_KEY)
-    elif GEMINI_API_KEY and GEMINI_API_KEY.startswith("gsk_"):
-        return await get_groq_response(prompt, GEMINI_API_KEY)
-    elif GEMINI_API_KEY:
+    if not groq_rotator.is_empty():
+        return await get_groq_response(prompt)
+    elif not gemini_rotator.is_empty():
         return await get_gemini_response(prompt)
     else:
         return "⚠️ AI API key sozlanmagan."
@@ -120,11 +141,16 @@ async def chat_handler(message: Message):
         return
 
     lang = await get_user_lang(message.from_user.id)
+    user_id = message.from_user.id
     url = extract_url(message.text)
 
     if url:
         # 1. Video URL handling
         if is_video_url(url):
+            try:
+                await bot.send_chat_action(message.chat.id, "upload_video")
+            except Exception:
+                pass
             thinking_msg = await message.answer(MESSAGES[lang]["downloading_video"])
             video_path = await download_video(url)
 
@@ -133,16 +159,23 @@ async def chat_handler(message: Message):
                     video_file = FSInputFile(video_path)
                     await message.answer_video(video_file, caption="✅ Video yuklab olindi!")
                     await thinking_msg.delete()
+                    await log_activity(user_id, "video_download", url, "success")
                 except Exception as e:
                     logger.error(f"Error sending downloaded video: {e}")
                     await thinking_msg.edit_text(MESSAGES[lang]["video_error"])
+                    await log_activity(user_id, "video_download", url, f"error: {str(e)[:50]}")
                 finally:
                     cleanup(video_path)
             else:
                 await thinking_msg.edit_text(MESSAGES[lang]["video_error"])
+                await log_activity(user_id, "video_download", url, "failed")
             return
 
         # 2. General webpage article URL handling
+        try:
+            await bot.send_chat_action(message.chat.id, "typing")
+        except Exception:
+            pass
         thinking_msg = await message.answer(MESSAGES[lang]["scraping_web"])
         web_text = await scrape_webpage(url)
 
@@ -153,13 +186,21 @@ async def chat_handler(message: Message):
             )
             summary = await get_ai_response(prompt)
             await thinking_msg.edit_text(f"🌐 <b>Veb-sahifa mazmuni:</b>\n\n{summary}", parse_mode="HTML")
+            await log_activity(user_id, "web_summary", url, "success")
         else:
             await thinking_msg.edit_text(MESSAGES[lang]["video_error"])
+            await log_activity(user_id, "web_summary", url, "failed")
         return
 
     # 3. Standard AI Chat (no URL)
+    try:
+        await bot.send_chat_action(message.chat.id, "typing")
+    except Exception:
+        pass
+
     thinking_msg = await message.answer(MESSAGES[lang].get("ai_thinking", "⏳..."))
     response = await get_ai_response(message.text)
+    await log_activity(user_id, "ai_query", message.text[:100], "success")
 
     if len(response) > 4000:
         response = response[:4000] + "\n\n... (qisqartirildi)"
@@ -173,6 +214,7 @@ async def chat_handler(message: Message):
 @router.inline_query()
 async def inline_ai(query: InlineQuery):
     query_text = (query.query or "").strip()
+    user_id = query.from_user.id
 
     # 1. EMPTY QUERY -> Return Games (Snake and 2048)
     if not query_text:
@@ -189,7 +231,6 @@ async def inline_ai(query: InlineQuery):
         await query.answer(games, cache_time=300)
         return
 
-    # If query is too short for search/AI, return early
     if len(query_text) < 3:
         return
 
@@ -216,10 +257,12 @@ async def inline_ai(query: InlineQuery):
                 )
             ]
             await query.answer(results, cache_time=300)
+            await log_activity(user_id, "inline_video_query", url, "success")
             return
 
     # 3. QUERY IS TEXT -> Return AI answer article
     response = await get_ai_response(query_text)
+    await log_activity(user_id, "inline_ai_query", query_text[:100], "success")
 
     if len(response) > 4000:
         response = response[:4000] + "..."

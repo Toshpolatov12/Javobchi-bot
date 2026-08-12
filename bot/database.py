@@ -4,6 +4,8 @@ from bot.config import SUPABASE_URL, SUPABASE_KEY
 
 logger = logging.getLogger(__name__)
 
+MAX_ACTIVITY_LOGS = 2000  # FIFO Pruning limit to keep Supabase storage free & safe
+
 
 def _headers(prefer: str = "") -> dict:
     h = {
@@ -24,7 +26,9 @@ async def _request(method: str, endpoint: str, **kwargs) -> dict | list | None:
         async with httpx.AsyncClient(timeout=10) as client:
             url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
             resp = await getattr(client, method)(url, **kwargs)
-            if resp.status_code in (200, 201):
+            if resp.status_code in (200, 201, 204):
+                if resp.status_code == 204 or not resp.text.strip():
+                    return []
                 return resp.json()
             logger.error(f"Supabase {method.upper()} {endpoint}: {resp.status_code} {resp.text[:200]}")
             return None
@@ -52,6 +56,37 @@ async def save_user(user_id: int, username: str, full_name: str, language: str):
     )
 
 
+async def prune_old_activities(max_rows: int = MAX_ACTIVITY_LOGS):
+    """FIFO Auto-Pruning: Keeps activities table size within free limit without touching users table."""
+    try:
+        result = await _request("get", "activities?select=id&order=id.asc", headers=_headers())
+        if result and isinstance(result, list) and len(result) > max_rows:
+            overflow = len(result) - max_rows
+            ids_to_delete = [str(r["id"]) for r in result[:overflow] if "id" in r]
+            if ids_to_delete:
+                ids_str = ",".join(ids_to_delete)
+                await _request("delete", f"activities?id=in.({ids_str})", headers=_headers())
+                logger.info(f"Supabase FIFO Pruner deleted {len(ids_to_delete)} old activity logs.")
+    except Exception as e:
+        logger.error(f"Error during Supabase activity log pruning: {e}")
+
+
+async def log_activity(user_id: int, action_type: str, content: str, status: str = "success"):
+    """Enhanced logging for user actions: file_transfer, ai_query, video_download, game_played, font_style."""
+    data = {
+        "user_id": user_id,
+        "file_name": content[:100] if content else "unknown",
+        "file_type": action_type,
+        "file_size": 0,
+        "action": action_type,
+        "target_format": status,
+        "status": status
+    }
+    await _request("post", "activities", headers=_headers(), json=data)
+    # Auto-prune old logs in background to maintain free storage limits
+    await prune_old_activities()
+
+
 async def log_file_activity(
     user_id: int, file_name: str, file_type: str,
     file_size: int, action: str, target_format: str, status: str
@@ -66,6 +101,7 @@ async def log_file_activity(
         "status": status
     }
     await _request("post", "activities", headers=_headers(), json=data)
+    await prune_old_activities()
 
 
 async def get_user_stats(user_id: int) -> int:
@@ -92,7 +128,6 @@ async def get_recent_activities(limit: int = 50) -> list:
 
 
 async def get_user_lang_raw(user_id: int) -> str | None:
-    """Returns exact saved language ('uz', 'ru', 'en') or None if user has never chosen language."""
     result = await _request(
         "get",
         f"users?id=eq.{user_id}&select=language",

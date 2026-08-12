@@ -2,7 +2,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from bot.main import bot, dp
-from handlers import start, converter, ai_chat, games
+from handlers import start, converter, ai_chat, games, font_handler
 from games.snake_html import SNAKE_HTML
 from games.game2048_html import GAME2048_HTML
 
@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 dp.include_router(start.router)
 dp.include_router(converter.router)
 dp.include_router(games.router)
+dp.include_router(font_handler.router)
 dp.include_router(ai_chat.router)
 
 app = FastAPI()

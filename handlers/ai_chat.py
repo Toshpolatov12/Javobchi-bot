@@ -18,7 +18,6 @@ from utils.link_downloader import (
 )
 from utils.file_helper import cleanup
 from utils.token_rotator import groq_rotator, gemini_rotator
-from bot.main import bot
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -142,13 +141,14 @@ async def chat_handler(message: Message):
 
     lang = await get_user_lang(message.from_user.id)
     user_id = message.from_user.id
+    bot_token_id = message.bot.token[:10] if message.bot and message.bot.token else "bot"
     url = extract_url(message.text)
 
     if url:
         # 1. Video URL handling
         if is_video_url(url):
             try:
-                await bot.send_chat_action(message.chat.id, "upload_video")
+                await message.bot.send_chat_action(message.chat.id, "upload_video")
             except Exception:
                 pass
             thinking_msg = await message.answer(MESSAGES[lang]["downloading_video"])
@@ -159,21 +159,21 @@ async def chat_handler(message: Message):
                     video_file = FSInputFile(video_path)
                     await message.answer_video(video_file, caption="✅ Video yuklab olindi!")
                     await thinking_msg.delete()
-                    await log_activity(user_id, "video_download", url, "success")
+                    await log_activity(user_id, "video_download", url, "success", bot_username=bot_token_id)
                 except Exception as e:
                     logger.error(f"Error sending downloaded video: {e}")
                     await thinking_msg.edit_text(MESSAGES[lang]["video_error"])
-                    await log_activity(user_id, "video_download", url, f"error: {str(e)[:50]}")
+                    await log_activity(user_id, "video_download", url, f"error: {str(e)[:50]}", bot_username=bot_token_id)
                 finally:
                     cleanup(video_path)
             else:
                 await thinking_msg.edit_text(MESSAGES[lang]["video_error"])
-                await log_activity(user_id, "video_download", url, "failed")
+                await log_activity(user_id, "video_download", url, "failed", bot_username=bot_token_id)
             return
 
         # 2. General webpage article URL handling
         try:
-            await bot.send_chat_action(message.chat.id, "typing")
+            await message.bot.send_chat_action(message.chat.id, "typing")
         except Exception:
             pass
         thinking_msg = await message.answer(MESSAGES[lang]["scraping_web"])
@@ -186,21 +186,21 @@ async def chat_handler(message: Message):
             )
             summary = await get_ai_response(prompt)
             await thinking_msg.edit_text(f"🌐 <b>Veb-sahifa mazmuni:</b>\n\n{summary}", parse_mode="HTML")
-            await log_activity(user_id, "web_summary", url, "success")
+            await log_activity(user_id, "web_summary", url, "success", bot_username=bot_token_id)
         else:
             await thinking_msg.edit_text(MESSAGES[lang]["video_error"])
-            await log_activity(user_id, "web_summary", url, "failed")
+            await log_activity(user_id, "web_summary", url, "failed", bot_username=bot_token_id)
         return
 
     # 3. Standard AI Chat (no URL)
     try:
-        await bot.send_chat_action(message.chat.id, "typing")
+        await message.bot.send_chat_action(message.chat.id, "typing")
     except Exception:
         pass
 
     thinking_msg = await message.answer(MESSAGES[lang].get("ai_thinking", "⏳..."))
     response = await get_ai_response(message.text)
-    await log_activity(user_id, "ai_query", message.text[:100], "success")
+    await log_activity(user_id, "ai_query", message.text[:100], "success", bot_username=bot_token_id)
 
     if len(response) > 4000:
         response = response[:4000] + "\n\n... (qisqartirildi)"
@@ -215,6 +215,7 @@ async def chat_handler(message: Message):
 async def inline_ai(query: InlineQuery):
     query_text = (query.query or "").strip()
     user_id = query.from_user.id
+    bot_token_id = query.bot.token[:10] if query.bot and query.bot.token else "bot"
 
     # 1. EMPTY QUERY -> Return Games (Snake and 2048)
     if not query_text:
@@ -257,12 +258,12 @@ async def inline_ai(query: InlineQuery):
                 )
             ]
             await query.answer(results, cache_time=300)
-            await log_activity(user_id, "inline_video_query", url, "success")
+            await log_activity(user_id, "inline_video_query", url, "success", bot_username=bot_token_id)
             return
 
     # 3. QUERY IS TEXT -> Return AI answer article
     response = await get_ai_response(query_text)
-    await log_activity(user_id, "inline_ai_query", query_text[:100], "success")
+    await log_activity(user_id, "inline_ai_query", query_text[:100], "success", bot_username=bot_token_id)
 
     if len(response) > 4000:
         response = response[:4000] + "..."

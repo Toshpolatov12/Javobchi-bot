@@ -1,13 +1,13 @@
 import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
-from bot.main import bot, dp
+from bot.main import get_bot_instance, get_all_bots, bot, dp
 from handlers import start, converter, ai_chat, games, font_handler
 from games.snake_html import SNAKE_HTML
 from games.game2048_html import GAME2048_HTML
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-logger = logging.getLogger(__name__)
+logger = logger = logging.getLogger(__name__)
 
 # Register routers — ORDER MATTERS!
 dp.include_router(start.router)
@@ -19,24 +19,37 @@ dp.include_router(ai_chat.router)
 app = FastAPI()
 
 
+@app.post("/api/webhook/{token}")
 @app.post("/api/webhook")
-async def webhook(request: Request):
+async def webhook(request: Request, token: str = None):
     try:
         data = await request.json()
-        await dp.feed_raw_update(bot, data)
+        target_bot = get_bot_instance(token) if token else bot
+        await dp.feed_raw_update(target_bot, data)
     except Exception as e:
-        logger.error(f"Webhook error: {e}")
+        token_sub = token[:10] if token else "default"
+        logger.error(f"Webhook error for bot token {token_sub}...: {e}")
     return {"ok": True}
 
 
 @app.get("/api/webhook")
 async def health():
-    return {"status": "running", "bot": "File Converter & Game Bot"}
+    active_count = len(get_all_bots())
+    return {
+        "status": "running",
+        "bot": "File Converter & Game Multi-Bot Server",
+        "active_bots_count": active_count
+    }
 
 
 @app.get("/")
 async def root():
-    return {"status": "running", "bot": "File Converter & Game Bot"}
+    active_count = len(get_all_bots())
+    return {
+        "status": "running",
+        "bot": "File Converter & Game Multi-Bot Server",
+        "active_bots_count": active_count
+    }
 
 
 # --- HTML5 Games Hosting Routes ---

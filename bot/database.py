@@ -71,32 +71,33 @@ async def prune_old_activities(max_rows: int = MAX_ACTIVITY_LOGS):
         logger.error(f"Error during Supabase activity log pruning: {e}")
 
 
-async def log_activity(user_id: int, action_type: str, content: str, status: str = "success"):
-    """Enhanced logging for user actions: file_transfer, ai_query, video_download, game_played, font_style."""
+async def log_activity(user_id: int, action_type: str, content: str, status: str = "success", bot_username: str = ""):
+    """Enhanced logging for user actions, including bot_username identifier for Multi-Bot analytics."""
+    action_label = f"{action_type} [{bot_username}]" if bot_username else action_type
     data = {
         "user_id": user_id,
         "file_name": content[:100] if content else "unknown",
         "file_type": action_type,
         "file_size": 0,
-        "action": action_type,
+        "action": action_label,
         "target_format": status,
         "status": status
     }
     await _request("post", "activities", headers=_headers(), json=data)
-    # Auto-prune old logs in background to maintain free storage limits
     await prune_old_activities()
 
 
 async def log_file_activity(
     user_id: int, file_name: str, file_type: str,
-    file_size: int, action: str, target_format: str, status: str
+    file_size: int, action: str, target_format: str, status: str, bot_username: str = ""
 ):
+    action_label = f"{action} [{bot_username}]" if bot_username else action
     data = {
         "user_id": user_id,
         "file_name": file_name or "unknown",
         "file_type": file_type or "unknown",
         "file_size": file_size or 0,
-        "action": action,
+        "action": action_label,
         "target_format": target_format,
         "status": status
     }

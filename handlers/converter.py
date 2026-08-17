@@ -8,7 +8,7 @@ from keyboards.converter_kb import get_format_keyboard, build_format_description
 from utils.file_helper import get_extension, cleanup, generate_output_path
 from converters.registry import get_available_formats, get_converter, get_file_category
 from bot.config import MAX_FILE_SIZE
-from bot.main import bot
+
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -178,9 +178,9 @@ async def convert_callback(call: CallbackQuery):
 
     try:
         # Download file from Telegram
-        file = await bot.get_file(file_id)
+        file = await call.bot.get_file(file_id)
         input_path = f"/tmp/{file_name}"
-        await bot.download_file(file.file_path, input_path)
+        await call.bot.download_file(file.file_path, input_path)
 
         # Generate output path
         output_path = generate_output_path(file_name, target_ext)

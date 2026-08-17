@@ -7,6 +7,13 @@ logger = logging.getLogger(__name__)
 
 dp = Dispatcher(storage=MemoryStorage())
 BOT_INSTANCES: dict[str, Bot] = {}
+# Maps bot_id (numeric part before ':') -> full token
+BOT_ID_TO_TOKEN: dict[str, str] = {}
+
+
+def _extract_bot_id(token: str) -> str:
+    """Extracts the numeric bot ID from a token like '896218801:AAEy...'"""
+    return token.split(":")[0] if ":" in token else token
 
 
 def get_bot_instance(token: str = None) -> Bot:
@@ -20,12 +27,22 @@ def get_bot_instance(token: str = None) -> Bot:
     if target_token not in BOT_INSTANCES:
         try:
             BOT_INSTANCES[target_token] = Bot(token=target_token)
-            logger.info(f"Initialized Bot instance for token: {target_token[:10]}...")
+            bot_id = _extract_bot_id(target_token)
+            BOT_ID_TO_TOKEN[bot_id] = target_token
+            logger.info(f"Initialized Bot instance for bot_id: {bot_id}")
         except Exception as e:
             logger.error(f"Failed to initialize Bot instance for token {target_token[:10]}...: {e}")
             raise e
 
     return BOT_INSTANCES[target_token]
+
+
+def get_bot_by_id(bot_id: str) -> Bot | None:
+    """Returns Bot instance by numeric bot_id (e.g. '896218801')."""
+    token = BOT_ID_TO_TOKEN.get(bot_id)
+    if token:
+        return BOT_INSTANCES.get(token)
+    return None
 
 
 def get_all_bots() -> list[Bot]:
@@ -40,5 +57,12 @@ def get_all_bots() -> list[Bot]:
     return bots
 
 
+# Initialize all bot instances at startup
+for _token in get_all_bot_tokens():
+    try:
+        get_bot_instance(_token)
+    except Exception as _e:
+        logger.error(f"Startup: Failed to init bot {_token[:10]}...: {_e}")
+
 # Default bot instance for backward compatibility
-bot = get_bot_instance()
+bot = BOT_INSTANCES.get(get_all_bot_tokens()[0]) if get_all_bot_tokens() else Bot(token=BOT_TOKEN)

@@ -66,6 +66,19 @@ def _set_cached_inline(query_text: str, response: str):
                 _INLINE_CACHE.pop(k, None)
 
 
+AI_SYSTEM_PROMPT = (
+    "Siz — @javobchiAIbot Telegram botining shaxsiy aqlli sun'iy intellekt yordamchisisiz.\n\n"
+    "QAT'IY QOIDALAR:\n"
+    "1. HECH QACHON o'zingizni 'ChatGPT', 'OpenAI', 'Google' yoki boshqa begona kompaniya modeli deb tanishtirmang!\n"
+    "2. Agar foydalanuvchi salomlashsa, 'sen kimsan?', 'kim bu?', 'nima qila olasan?' yoki o'zingiz haqingizda so'ralsa, "
+    "doimo o'zingizni '@javobchiAIbot ning shaxsiy sun'iy intellekt yordamchisi' deb tanishtiring va botning asosiy imkoniyatlarini qisqa (2-3 qatorda) ta'kidlang:\n"
+    "   • 📁 50+ formatdagi fayllarni o'zgartirish (rasm, hujjat, jadval, video, audio)\n"
+    "   • 🎬 Instagram, YouTube, TikTok dan videolarni yuklab berish\n"
+    "   • 💬 Aqlli AI suhbat va inline o'yinlar (Snake, 2048)\n"
+    "3. Boshqa barcha savollarga aniq, ravon, samimiy, xushmuomala va suhbat tarixini inobatga olgan holda javob bering."
+)
+
+
 async def get_groq_response(messages: list[dict] | str, model_index: int = 0) -> str:
     key = groq_rotator.get_key()
     if not key:
@@ -83,11 +96,7 @@ async def get_groq_response(messages: list[dict] | str, model_index: int = 0) ->
 
     system_prompt = {
         "role": "system",
-        "content": (
-            "Siz aqlli, xushmuomala va foydali AI yordamchisiz. "
-            "Foydalanuvchi bilan samimiy suhbatlashing. Suhbat tarixidagi avvalgi savol-javoblarni "
-            "doimo inobatga olgan holda mantiqiy va kontekstga mos javob bering."
-        )
+        "content": AI_SYSTEM_PROMPT
     }
 
     headers = {
@@ -150,6 +159,9 @@ async def get_gemini_response(messages: list[dict] | str) -> str:
             contents.append({"role": role, "parts": [{"text": m.get("content", "")}]})
 
     payload = {
+        "systemInstruction": {
+            "parts": [{"text": AI_SYSTEM_PROMPT}]
+        },
         "contents": contents,
         "generationConfig": {
             "maxOutputTokens": 1500,

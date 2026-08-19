@@ -3,6 +3,7 @@ import logging
 import hashlib
 import aiohttp
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import (
     Message, InlineQuery, InlineQueryResultArticle, InlineQueryResultVideo,
     InlineQueryResultGame, InputTextMessageContent, FSInputFile
@@ -18,6 +19,7 @@ from utils.link_downloader import (
 )
 from utils.file_helper import cleanup
 from utils.token_rotator import groq_rotator, gemini_rotator
+from utils.chat_memory import get_user_history, add_chat_turn, clear_user_history
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -37,7 +39,7 @@ GROQ_MODELS = [
 ]
 
 
-async def get_groq_response(prompt: str, model_index: int = 0) -> str:
+async def get_groq_response(messages: list[dict] | str, model_index: int = 0) -> str:
     key = groq_rotator.get_key()
     if not key:
         return "⚠️ Groq API key sozlanmagan."
@@ -47,16 +49,27 @@ async def get_groq_response(prompt: str, model_index: int = 0) -> str:
 
     model = GROQ_MODELS[model_index]
 
+    if isinstance(messages, str):
+        msg_list = [{"role": "user", "content": messages}]
+    else:
+        msg_list = messages
+
+    system_prompt = {
+        "role": "system",
+        "content": (
+            "Siz aqlli, xushmuomala va foydali AI yordamchisiz. "
+            "Foydalanuvchi bilan samimiy suhbatlashing. Suhbat tarixidagi avvalgi savol-javoblarni "
+            "doimo inobatga olgan holda mantiqiy va kontekstga mos javob bering."
+        )
+    }
+
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json"
     }
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": "Siz foydali AI yordamchisiz. Foydalanuvchiga aniq, ravon va xushmuomala javob bering."},
-            {"role": "user", "content": prompt}
-        ],
+        "messages": [system_prompt] + msg_list,
         "temperature": 0.7,
         "max_tokens": 2048
     }
@@ -68,21 +81,19 @@ async def get_groq_response(prompt: str, model_index: int = 0) -> str:
                     data = await resp.json()
                     return data["choices"][0]["message"]["content"]
                 elif resp.status == 404:
-                    # Model mavjud emas — keyingi modelga o'tish
                     logger.warning(f"Groq model '{model}' not found (404). Trying next model...")
-                    return await get_groq_response(prompt, model_index + 1)
+                    return await get_groq_response(messages, model_index + 1)
                 elif resp.status in (429, 403):
                     logger.warning(f"Groq 429/quota error on key: {key[:8]}... Rotating key...")
                     groq_rotator.mark_busy()
                     next_key = groq_rotator.get_key()
                     if next_key and next_key != key:
-                        return await get_groq_response(prompt)
+                        return await get_groq_response(messages)
                     return "❌ AI xizmati vaqtincha band (429 Rate limit)."
                 else:
                     error_text = await resp.text()
                     logger.error(f"Groq API error {resp.status} with model '{model}': {error_text[:200]}")
-                    # Boshqa xatolikda ham keyingi modelga o'tishga urinish
-                    return await get_groq_response(prompt, model_index + 1)
+                    return await get_groq_response(messages, model_index + 1)
     except aiohttp.ClientTimeout:
         return "⏰ Javob vaqti tugadi. Qayta urinib ko'ring."
     except Exception as e:
@@ -90,14 +101,23 @@ async def get_groq_response(prompt: str, model_index: int = 0) -> str:
         return "❌ Xatolik yuz berdi."
 
 
-async def get_gemini_response(prompt: str) -> str:
+async def get_gemini_response(messages: list[dict] | str) -> str:
     key = gemini_rotator.get_key()
     if not key:
         return "⚠️ Gemini API key sozlanmagan."
 
     url = f"{GEMINI_URL}?key={key}"
+
+    if isinstance(messages, str):
+        contents = [{"role": "user", "parts": [{"text": messages}]}]
+    else:
+        contents = []
+        for m in messages:
+            role = "user" if m.get("role") == "user" else "model"
+            contents.append({"role": role, "parts": [{"text": m.get("content", "")}]})
+
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
+        "contents": contents,
         "generationConfig": {
             "maxOutputTokens": 2048,
             "temperature": 0.7
@@ -115,7 +135,7 @@ async def get_gemini_response(prompt: str) -> str:
                     gemini_rotator.mark_busy()
                     next_key = gemini_rotator.get_key()
                     if next_key and next_key != key:
-                        return await get_gemini_response(prompt)
+                        return await get_gemini_response(messages)
                     return "❌ AI xizmati vaqtincha band (429 Rate limit)."
                 else:
                     error_text = await resp.text()
@@ -128,13 +148,26 @@ async def get_gemini_response(prompt: str) -> str:
         return "❌ Xatolik yuz berdi."
 
 
-async def get_ai_response(prompt: str) -> str:
+async def get_ai_response(messages: list[dict] | str) -> str:
     if not groq_rotator.is_empty():
-        return await get_groq_response(prompt)
+        return await get_groq_response(messages)
     elif not gemini_rotator.is_empty():
-        return await get_gemini_response(prompt)
+        return await get_gemini_response(messages)
     else:
         return "⚠️ AI API key sozlanmagan."
+
+
+@router.message(Command("clear", "newchat", "reset", "tozala"))
+async def clear_chat_command(message: Message):
+    user_id = message.from_user.id
+    lang = await get_user_lang(user_id)
+    await clear_user_history(user_id)
+    clear_msg = {
+        "uz": "🧹 <b>Suhbat xotirasi tozalandi!</b>\n\nYangi mavzuda savol berishingiz mumkin.",
+        "ru": "🧹 <b>История диалога очищена!</b>\n\nМожете начать новую тему.",
+        "en": "🧹 <b>Conversation history cleared!</b>\n\nYou can start a new topic."
+    }.get(lang, "🧹 <b>Suhbat xotirasi tozalandi!</b>")
+    await message.answer(clear_msg, parse_mode="HTML")
 
 
 @router.message(F.text.in_([
@@ -143,7 +176,14 @@ async def get_ai_response(prompt: str) -> str:
 ]))
 async def ai_mode_handler(message: Message):
     lang = await get_user_lang(message.from_user.id)
-    await message.answer(MESSAGES[lang]["ai_mode"], parse_mode="HTML")
+    ai_text = MESSAGES[lang]["ai_mode"] + (
+        "\n\n💡 <i>Mavzuni tozalab yangidan boshlash uchun /clear buyrug'ini yuboring.</i>"
+        if lang == "uz" else
+        "\n\n💡 <i>Чтобы очистить контекст и начать заново, отправьте /clear.</i>"
+        if lang == "ru" else
+        "\n\n💡 <i>Send /clear to reset context and start fresh.</i>"
+    )
+    await message.answer(ai_text, parse_mode="HTML")
 
 
 @router.message(F.text & ~F.text.startswith("/"))
@@ -155,7 +195,7 @@ async def chat_handler(message: Message):
         "❓ Yordam", "❓ Помощь", "❓ Help",
         "🤖 AI rejim", "🤖 AI режим", "🤖 AI Mode",
         "🤖 AI Suhbat", "🤖 AI Чат",
-        "⬅️ Orqaga", "⬅️ Назад", "⬅️ Back"
+        "⬅️ Orqaga", "⬅️ Наzad", "⬅️ Back"
     ]
     if message.text in menu_texts:
         return
@@ -213,15 +253,25 @@ async def chat_handler(message: Message):
             await log_activity(user_id, "web_summary", url, "failed", bot_username=bot_token_id)
         return
 
-    # 3. Standard AI Chat (no URL)
+    # 3. Standard Multi-Turn Conversational AI Chat
     try:
         await message.bot.send_chat_action(message.chat.id, "typing")
     except Exception:
         pass
 
     thinking_msg = await message.answer(MESSAGES[lang].get("ai_thinking", "⏳..."))
-    response = await get_ai_response(message.text)
+
+    # Load recent conversation history
+    history = await get_user_history(user_id)
+    current_messages = history + [{"role": "user", "content": message.text}]
+
+    # Query AI with complete dialog context
+    response = await get_ai_response(current_messages)
     await log_activity(user_id, "ai_query", message.text[:100], "success", bot_username=bot_token_id)
+
+    # Save to history if valid response
+    if response and not response.startswith("❌") and not response.startswith("⚠️"):
+        await add_chat_turn(user_id, message.text, response)
 
     if len(response) > 4000:
         response = response[:4000] + "\n\n... (qisqartirildi)"
@@ -282,7 +332,7 @@ async def inline_ai(query: InlineQuery):
             await log_activity(user_id, "inline_video_query", url, "success", bot_username=bot_token_id)
             return
 
-    # 3. QUERY IS TEXT -> Return AI answer article
+    # 3. QUERY IS TEXT -> Return AI answer article (single turn for inline)
     response = await get_ai_response(query_text)
     await log_activity(user_id, "inline_ai_query", query_text[:100], "success", bot_username=bot_token_id)
 

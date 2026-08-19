@@ -16,7 +16,9 @@ Telegram bot — Universal fayl konvertatsiya, AI suhbat, video yuklab olish, in
 | 📚 E-Kitoblar | EPUB → TXT, PDF |
 
 ### 🤖 AI Suhbat va Web Tahlil
-- **Groq (Llama 3.3 70B)** va **Gemini** orqali tezkor AI javoblar
+- **Kontekstli Suhbat (Multi-Turn Chat)** — AI avvalgi savol va javoblaringizni eslab qoladi va haqiqiy ChatGPT/Claude kabi suhbat olib boradi
+- **`/clear` / `/newchat`** — Suhbat xotirasini tozalab, yangi mavzu boshlash buyrug'i
+- **Groq (GPT-OSS 120B / Qwen / Compound)** va **Gemini** orqali o'ta tezkor AI javoblar
 - **Multi-API Key Rotator** — 429 rate limit bo'lganda avtomatik zaxira kalitga o'tadi
 - Veb-sahifa havolasi yuborilsa — AI mazmunini qisqartiradi (summary)
 - Bot javob tayyorlayotganda **"yozyapti..."** holati ko'rsatiladi
@@ -153,6 +155,7 @@ Bu sahifa **barcha botlaringiz** uchun alohida webhook URL'larni avtomatik o'rna
 |---|---|
 | `/start` | Botni ishga tushirish, tilni aniqlash |
 | `/help` | Barcha formatlar ro'yxati |
+| `/clear` | AI suhbat xotirasi (kontekst)ni tozalash |
 | `/font` | Unicode font stilizatsiyasi |
 | `/stats` | Admin statistikasi (faqat ADMIN_ID) |
 | `@botusername` | Inline: o'yinlar (bo'sh), AI javob (matn), video (link) |

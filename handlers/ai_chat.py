@@ -8,7 +8,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import (
     Message, InlineQuery, InlineQueryResultArticle, InlineQueryResultVideo,
-    InputTextMessageContent, FSInputFile
+    InputTextMessageContent, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 )
 from bot.database import get_user_lang, log_activity
 from bot.locales import MESSAGES
@@ -339,69 +339,142 @@ async def inline_ai(query: InlineQuery):
     user_id = query.from_user.id
     bot_token_id = query.bot.token[:10] if query.bot and query.bot.token else "bot"
 
-    # 1. EMPTY QUERY -> Return prompt hints
+    # 1. EMPTY QUERY -> Return prompt hints with interactive buttons
     if not query_text:
         results = [
             InlineQueryResultArticle(
                 id="inline_help_ai",
-                title="🤖 AI Suhbat & Savol-Javob",
-                description="Masalan: @botusername Python dasturlash tili nima?",
+                title="🤖 AI Savol-Javob",
+                description="Matn yozing: @botusername Python nima?",
                 input_message_content=InputTextMessageContent(
                     message_text="🤖 <b>@javobchiAIbot</b> orqali AI'ga savol berishingiz, video yuklab olishingiz yoki chiroyli shriftlar ishlatishingiz mumkin.",
                     parse_mode="HTML"
-                )
+                ),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="💬 AI'ga savol berish", switch_inline_query_current_chat="")
+                ]])
             ),
             InlineQueryResultArticle(
                 id="inline_help_font",
                 title="🔤 Chiroyli Fontlar (/font)",
-                description="Masalan: @botusername /font Salom Dunyo",
+                description="Font tanlash uchun bosing: /font",
                 input_message_content=InputTextMessageContent(
                     message_text="💡 <b>Chiroyli shriftda yozish uchun:</b>\n\n<code>@javobchiAIbot /font Matningiz</code>",
                     parse_mode="HTML"
-                )
+                ),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="✍️ Shriftda yozish", switch_inline_query_current_chat="/font ")
+                ]])
             )
         ]
         await query.answer(results, cache_time=300, is_personal=True)
         return
 
-    # 2. FONT STYLIZER INLINE MODE (e.g. @bot /font Salom or @bot font Salom)
+    # 2. FONT STYLIZER INLINE MODE (e.g. @bot /font or @bot /font Bubble Salom or @bot /font Salom)
     if re.match(r'^[/.!]?font\b', query_text, flags=re.IGNORECASE):
-        font_text = re.sub(r'^[/.!]?font\s*', '', query_text, flags=re.IGNORECASE).strip()
-        if not font_text:
+        after_font = re.sub(r'^[/.!]?font\s*', '', query_text, flags=re.IGNORECASE).strip()
+
+        # A) No text provided yet -> show font style list with interactive insertion buttons
+        if not after_font:
             sample = "Salom Dunyo 123"
             results = []
             for name in BUILTIN_FONTS.keys():
                 sample_formatted = apply_font(name, sample)
                 results.append(
                     InlineQueryResultArticle(
-                        id=f"font_hint_{name}",
-                        title=f"✨ {name}",
-                        description=f"Namuna: {sample_formatted} (matn yozing)",
+                        id=f"font_pick_{name}",
+                        title=f"✨ {name} — {sample_formatted}",
+                        description=f"Shu shriftda yozish uchun bosing: /font {name}",
                         input_message_content=InputTextMessageContent(
-                            message_text=f"💡 Foydalanish: <code>@javobchiAIbot /font Matningiz</code>",
+                            message_text=f"💡 <b>{name}</b> shrifti tanlandi. Matningizni yozing.",
                             parse_mode="HTML"
-                        )
+                        ),
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                            InlineKeyboardButton(text=f"✍️ {name} uslubida yozish", switch_inline_query_current_chat=f"/font {name} ")
+                        ]])
                     )
                 )
             await query.answer(results, cache_time=300, is_personal=True)
             return
 
-        # User provided text -> Generate stylized version for all 12 fonts
-        results = []
+        # B) Check if the user specified a font name first (e.g. "/font Bubble Salom")
+        matched_font = None
+        user_message = after_font
         for name in BUILTIN_FONTS.keys():
-            formatted = apply_font(name, font_text)
-            results.append(
+            if after_font.lower().startswith(name.lower()):
+                # e.g. "bubble salom" -> font: "Bubble", message: "salom"
+                rest = after_font[len(name):].strip()
+                matched_font = name
+                user_message = rest
+                break
+
+        # If a specific font was matched and text was given:
+        if matched_font and user_message:
+            formatted_main = apply_font(matched_font, user_message)
+            results = [
                 InlineQueryResultArticle(
-                    id=f"font_{name}_{hashlib.md5(font_text.encode()).hexdigest()[:10]}",
-                    title=f"✨ {name}",
-                    description=formatted,
+                    id=f"font_sel_{matched_font}_{hashlib.md5(user_message.encode()).hexdigest()[:8]}",
+                    title=f"✨ {matched_font}: {formatted_main}",
+                    description="Yuborish uchun bosing",
                     input_message_content=InputTextMessageContent(
-                        message_text=formatted  # ONLY sends user's stylized text
+                        message_text=formatted_main  # ONLY sends the formatted text!
                     )
                 )
-            )
+            ]
+            # Also append other font alternatives
+            for name in BUILTIN_FONTS.keys():
+                if name != matched_font:
+                    alt_formatted = apply_font(name, user_message)
+                    results.append(
+                        InlineQueryResultArticle(
+                            id=f"font_alt_{name}_{hashlib.md5(user_message.encode()).hexdigest()[:8]}",
+                            title=f"✨ {name}: {alt_formatted}",
+                            description="Shu shriftda yuborish",
+                            input_message_content=InputTextMessageContent(
+                                message_text=alt_formatted
+                            )
+                        )
+                    )
+            await query.answer(results, cache_time=300, is_personal=True)
+            await log_activity(user_id, "inline_font", user_message[:50], "success", bot_username=bot_token_id)
+            return
+
+        # If font name was matched but no text yet (e.g. "/font Bubble"):
+        if matched_font and not user_message:
+            sample_formatted = apply_font(matched_font, "Salom Dunyo")
+            results = [
+                InlineQueryResultArticle(
+                    id=f"font_wait_{matched_font}",
+                    title=f"✨ {matched_font}: Matningizni yozing...",
+                    description=f"Namuna: {sample_formatted}",
+                    input_message_content=InputTextMessageContent(
+                        message_text=f"💡 <b>{matched_font}</b> shrifti faol. Matningizni davomidan yozing.",
+                        parse_mode="HTML"
+                    ),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text=f"✍️ Matn yozish", switch_inline_query_current_chat=f"/font {matched_font} ")
+                    ]])
+                )
+            ]
+            await query.answer(results, cache_time=300, is_personal=True)
+            return
+
+        # C) Direct text without font name (e.g. "/font Salom dunyo") -> Show all 12 styles
+        results = []
+        for name in BUILTIN_FONTS.keys():
+            formatted = apply_font(name, after_font)
+            results.append(
+                InlineQueryResultArticle(
+                    id=f"font_all_{name}_{hashlib.md5(after_font.encode()).hexdigest()[:8]}",
+                    title=f"✨ {name}: {formatted}",
+                    description="Yuborish uchun bosing",
+                    input_message_content=InputTextMessageContent(
+                        message_text=formatted  # ONLY sends the formatted text!
+                    )
+                )
+            ]
         await query.answer(results, cache_time=300, is_personal=True)
-        await log_activity(user_id, "inline_font", font_text[:50], "success", bot_username=bot_token_id)
+        await log_activity(user_id, "inline_font", after_font[:50], "success", bot_username=bot_token_id)
         return
 
     if len(query_text) < 3:

@@ -163,9 +163,10 @@ async def test_ai():
     if groq_rotator.keys:
         key = groq_rotator.get_key()
         groq_models = [
-            "llama-3.3-70b-versatile", "llama-3.1-70b-versatile",
-            "llama3-70b-8192", "llama-3.1-8b-instant",
-            "llama3-8b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"
+            "openai/gpt-oss-120b", "openai/gpt-oss-20b",
+            "qwen/qwen3.6-27b", "qwen-qwq-32b",
+            "groq/compound", "groq/compound-mini",
+            "llama-3.3-70b-versatile"
         ]
         model_results = []
         for model in groq_models:

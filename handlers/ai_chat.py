@@ -472,7 +472,7 @@ async def inline_ai(query: InlineQuery):
                         message_text=formatted  # ONLY sends the formatted text!
                     )
                 )
-            ]
+            )
         await query.answer(results, cache_time=300, is_personal=True)
         await log_activity(user_id, "inline_font", after_font[:50], "success", bot_username=bot_token_id)
         return

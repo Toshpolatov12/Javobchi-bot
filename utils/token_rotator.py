@@ -4,7 +4,8 @@ from bot.config import GEMINI_API_KEY, GROQ_API_KEY
 
 logger = logging.getLogger(__name__)
 
-BUSY_COOLDOWN_SECONDS = 60
+# Reduce cooldown from 60s to 10s so temporary spikes don't lock keys for too long
+BUSY_COOLDOWN_SECONDS = 10
 
 
 class KeyRotator:
@@ -46,7 +47,7 @@ class KeyRotator:
 
     def mark_busy(self):
         if self.keys:
-            logger.warning(f"Key index {self._current_index} hit rate limit / 429. Rotating to next key...")
+            logger.warning(f"Key index {self._current_index} hit rate limit / 429. Rotating key...")
             self._busy_until[self._current_index] = time.time() + BUSY_COOLDOWN_SECONDS
             self._current_index = (self._current_index + 1) % len(self.keys)
 

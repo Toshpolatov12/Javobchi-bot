@@ -1,4 +1,5 @@
 import os
+import time
 import logging
 import hashlib
 import aiohttp
@@ -27,7 +28,7 @@ router = Router()
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# Groq modellar ro'yxati (Aug 2026) — birinchi ishlaganini ishlatadi
+# Groq modellar ro'yxati (Aug 2026)
 GROQ_MODELS = [
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
@@ -37,6 +38,32 @@ GROQ_MODELS = [
     "groq/compound-mini",
     "llama-3.3-70b-versatile",
 ]
+
+# Fast in-memory cache for inline queries to prevent 429 rate limit spamming: query_hash -> (timestamp, response_text)
+_INLINE_CACHE: dict[str, tuple[float, str]] = {}
+INLINE_CACHE_TTL = 180  # 3 minutes cache
+
+
+def _get_cached_inline(query_text: str) -> str | None:
+    h = hashlib.md5(query_text.strip().lower().encode()).hexdigest()
+    entry = _INLINE_CACHE.get(h)
+    if entry:
+        ts, resp = entry
+        if time.time() - ts < INLINE_CACHE_TTL:
+            return resp
+        _INLINE_CACHE.pop(h, None)
+    return None
+
+
+def _set_cached_inline(query_text: str, response: str):
+    h = hashlib.md5(query_text.strip().lower().encode()).hexdigest()
+    _INLINE_CACHE[h] = (time.time(), response)
+    # Prune old cache if size exceeds 300
+    if len(_INLINE_CACHE) > 300:
+        now = time.time()
+        for k in list(_INLINE_CACHE.keys())[:100]:
+            if now - _INLINE_CACHE[k][0] > INLINE_CACHE_TTL:
+                _INLINE_CACHE.pop(k, None)
 
 
 async def get_groq_response(messages: list[dict] | str, model_index: int = 0) -> str:
@@ -71,12 +98,12 @@ async def get_groq_response(messages: list[dict] | str, model_index: int = 0) ->
         "model": model,
         "messages": [system_prompt] + msg_list,
         "temperature": 0.7,
-        "max_tokens": 2048
+        "max_tokens": 1500
     }
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(GROQ_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.post(GROQ_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data["choices"][0]["message"]["content"]
@@ -84,16 +111,22 @@ async def get_groq_response(messages: list[dict] | str, model_index: int = 0) ->
                     logger.warning(f"Groq model '{model}' not found (404). Trying next model...")
                     return await get_groq_response(messages, model_index + 1)
                 elif resp.status in (429, 403):
-                    logger.warning(f"Groq 429/quota error on key: {key[:8]}... Rotating key...")
+                    logger.warning(f"Groq 429/quota error on model '{model}'. Rotating...")
                     groq_rotator.mark_busy()
+                    # Try next key if available
                     next_key = groq_rotator.get_key()
                     if next_key and next_key != key:
-                        return await get_groq_response(messages)
+                        return await get_groq_response(messages, model_index)
+                    # If same key, try alternative model (e.g. gpt-oss-20b or compound-mini)
+                    if model_index + 1 < len(GROQ_MODELS):
+                        return await get_groq_response(messages, model_index + 1)
                     return "❌ AI xizmati vaqtincha band (429 Rate limit)."
                 else:
                     error_text = await resp.text()
                     logger.error(f"Groq API error {resp.status} with model '{model}': {error_text[:200]}")
-                    return await get_groq_response(messages, model_index + 1)
+                    if model_index + 1 < len(GROQ_MODELS):
+                        return await get_groq_response(messages, model_index + 1)
+                    return "❌ AI xizmati vaqtincha ishlamayapti."
     except aiohttp.ClientTimeout:
         return "⏰ Javob vaqti tugadi. Qayta urinib ko'ring."
     except Exception as e:
@@ -119,14 +152,14 @@ async def get_gemini_response(messages: list[dict] | str) -> str:
     payload = {
         "contents": contents,
         "generationConfig": {
-            "maxOutputTokens": 2048,
+            "maxOutputTokens": 1500,
             "temperature": 0.7
         }
     }
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data["candidates"][0]["content"]["parts"][0]["text"]
@@ -149,8 +182,16 @@ async def get_gemini_response(messages: list[dict] | str) -> str:
 
 
 async def get_ai_response(messages: list[dict] | str) -> str:
+    """Gets AI response with automatic fallback across Groq and Gemini."""
     if not groq_rotator.is_empty():
-        return await get_groq_response(messages)
+        resp = await get_groq_response(messages)
+        # If Groq fails with rate limit or error, fallback to Gemini
+        if (resp.startswith("❌") or resp.startswith("⚠️")) and not gemini_rotator.is_empty():
+            logger.info("Groq unavailable, falling back to Gemini...")
+            gemini_resp = await get_gemini_response(messages)
+            if not gemini_resp.startswith("❌") and not gemini_resp.startswith("⚠️"):
+                return gemini_resp
+        return resp
     elif not gemini_rotator.is_empty():
         return await get_gemini_response(messages)
     else:
@@ -195,7 +236,7 @@ async def chat_handler(message: Message):
         "❓ Yordam", "❓ Помощь", "❓ Help",
         "🤖 AI rejim", "🤖 AI режим", "🤖 AI Mode",
         "🤖 AI Suhbat", "🤖 AI Чат",
-        "⬅️ Orqaga", "⬅️ Наzad", "⬅️ Back"
+        "⬅️ Orqaga", "⬅️ Назад", "⬅️ Back"
     ]
     if message.text in menu_texts:
         return
@@ -300,7 +341,7 @@ async def inline_ai(query: InlineQuery):
                 game_short_name=GAME2048_SHORT_NAME
             )
         ]
-        await query.answer(games, cache_time=300)
+        await query.answer(games, cache_time=300, is_personal=True)
         return
 
     if len(query_text) < 3:
@@ -328,12 +369,20 @@ async def inline_ai(query: InlineQuery):
                     parse_mode="HTML"
                 )
             ]
-            await query.answer(results, cache_time=300)
+            await query.answer(results, cache_time=300, is_personal=True)
             await log_activity(user_id, "inline_video_query", url, "success", bot_username=bot_token_id)
             return
 
-    # 3. QUERY IS TEXT -> Return AI answer article (single turn for inline)
-    response = await get_ai_response(query_text)
+    # 3. QUERY IS TEXT -> Return AI answer article
+    # Check fast cache first to avoid firing API on every single keystroke
+    cached_resp = _get_cached_inline(query_text)
+    if cached_resp:
+        response = cached_resp
+    else:
+        response = await get_ai_response(query_text)
+        if response and not response.startswith("❌") and not response.startswith("⚠️"):
+            _set_cached_inline(query_text, response)
+
     await log_activity(user_id, "inline_ai_query", query_text[:100], "success", bot_username=bot_token_id)
 
     if len(response) > 4000:
@@ -350,4 +399,5 @@ async def inline_ai(query: InlineQuery):
             )
         )
     ]
-    await query.answer(results, cache_time=5)
+    # Set cache_time=60 so Telegram client caches response for 60s instead of re-querying every keystroke
+    await query.answer(results, cache_time=60, is_personal=True)

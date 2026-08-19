@@ -51,6 +51,32 @@ class KeyRotator:
             self._current_index = (self._current_index + 1) % len(self.keys)
 
 
-# Initialize rotators from environment variables
-groq_rotator = KeyRotator(GROQ_API_KEY)
-gemini_rotator = KeyRotator(GEMINI_API_KEY)
+# --- Smart key detection ---
+# Collect all Groq keys (start with "gsk_") from both env vars
+# Collect all Gemini keys (do NOT start with "gsk_") from both env vars
+_all_raw_keys = []
+if GROQ_API_KEY:
+    _all_raw_keys.extend([k.strip() for k in GROQ_API_KEY.split(",") if k.strip()])
+if GEMINI_API_KEY:
+    _all_raw_keys.extend([k.strip() for k in GEMINI_API_KEY.split(",") if k.strip()])
+
+_groq_keys = [k for k in _all_raw_keys if k.startswith("gsk_")]
+_gemini_keys = [k for k in _all_raw_keys if not k.startswith("gsk_")]
+
+# Remove duplicates while preserving order
+_seen = set()
+_groq_unique = []
+for k in _groq_keys:
+    if k not in _seen:
+        _seen.add(k)
+        _groq_unique.append(k)
+_gemini_unique = []
+for k in _gemini_keys:
+    if k not in _seen:
+        _seen.add(k)
+        _gemini_unique.append(k)
+
+groq_rotator = KeyRotator(",".join(_groq_unique) if _groq_unique else "")
+gemini_rotator = KeyRotator(",".join(_gemini_unique) if _gemini_unique else "")
+
+logger.info(f"AI Keys loaded: {len(_groq_unique)} Groq key(s), {len(_gemini_unique)} Gemini key(s)")

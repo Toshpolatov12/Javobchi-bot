@@ -25,18 +25,34 @@ router = Router()
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
+# Groq modellar ro'yxati — birinchi ishlaganini ishlatadi (agar model o'chirilsa, keyingisiga o'tadi)
+GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-70b-versatile",
+    "llama3-70b-8192",
+    "llama-3.1-8b-instant",
+    "llama3-8b-8192",
+    "mixtral-8x7b-32768",
+    "gemma2-9b-it",
+]
 
-async def get_groq_response(prompt: str) -> str:
+
+async def get_groq_response(prompt: str, model_index: int = 0) -> str:
     key = groq_rotator.get_key()
     if not key:
         return "⚠️ Groq API key sozlanmagan."
+
+    if model_index >= len(GROQ_MODELS):
+        return "❌ Hech qanday AI model ishlamayapti. Keyinroq urinib ko'ring."
+
+    model = GROQ_MODELS[model_index]
 
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "llama-3.3-70b-versatile",
+        "model": model,
         "messages": [
             {"role": "system", "content": "Siz foydali AI yordamchisiz. Foydalanuvchiga aniq, ravon va xushmuomala javob bering."},
             {"role": "user", "content": prompt}
@@ -51,6 +67,10 @@ async def get_groq_response(prompt: str) -> str:
                 if resp.status == 200:
                     data = await resp.json()
                     return data["choices"][0]["message"]["content"]
+                elif resp.status == 404:
+                    # Model mavjud emas — keyingi modelga o'tish
+                    logger.warning(f"Groq model '{model}' not found (404). Trying next model...")
+                    return await get_groq_response(prompt, model_index + 1)
                 elif resp.status in (429, 403):
                     logger.warning(f"Groq 429/quota error on key: {key[:8]}... Rotating key...")
                     groq_rotator.mark_busy()
@@ -60,8 +80,9 @@ async def get_groq_response(prompt: str) -> str:
                     return "❌ AI xizmati vaqtincha band (429 Rate limit)."
                 else:
                     error_text = await resp.text()
-                    logger.error(f"Groq API error {resp.status}: {error_text[:200]}")
-                    return "❌ AI xizmati vaqtincha ishlamayapti."
+                    logger.error(f"Groq API error {resp.status} with model '{model}': {error_text[:200]}")
+                    # Boshqa xatolikda ham keyingi modelga o'tishga urinish
+                    return await get_groq_response(prompt, model_index + 1)
     except aiohttp.ClientTimeout:
         return "⏰ Javob vaqti tugadi. Qayta urinib ko'ring."
     except Exception as e:

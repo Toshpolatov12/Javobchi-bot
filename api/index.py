@@ -159,31 +159,43 @@ async def test_ai():
         "gemini_test": None
     }
 
-    # Test Groq
+    # Test Groq — try multiple models to find one that works
     if groq_rotator.keys:
         key = groq_rotator.get_key()
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    json={
-                        "model": "llama-3.3-70b-versatile",
-                        "messages": [{"role": "user", "content": "Say hi"}],
-                        "max_tokens": 5
-                    },
-                    headers={
-                        "Authorization": f"Bearer {key}",
-                        "Content-Type": "application/json"
-                    },
-                    timeout=aiohttp.ClientTimeout(total=15)
-                ) as resp:
-                    body = await resp.text()
-                    results["groq_test"] = {
-                        "status_code": resp.status,
-                        "response": body[:500]
-                    }
-        except Exception as e:
-            results["groq_test"] = {"error": str(e)}
+        groq_models = [
+            "llama-3.3-70b-versatile", "llama-3.1-70b-versatile",
+            "llama3-70b-8192", "llama-3.1-8b-instant",
+            "llama3-8b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"
+        ]
+        model_results = []
+        for model in groq_models:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        json={
+                            "model": model,
+                            "messages": [{"role": "user", "content": "Say hi"}],
+                            "max_tokens": 5
+                        },
+                        headers={
+                            "Authorization": f"Bearer {key}",
+                            "Content-Type": "application/json"
+                        },
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as resp:
+                        body = await resp.text()
+                        model_results.append({
+                            "model": model,
+                            "status_code": resp.status,
+                            "works": resp.status == 200,
+                            "response": body[:200]
+                        })
+                        if resp.status == 200:
+                            break  # Found a working model, stop testing
+            except Exception as e:
+                model_results.append({"model": model, "error": str(e)})
+        results["groq_test"] = model_results
 
     # Test Gemini
     if gemini_rotator.keys:

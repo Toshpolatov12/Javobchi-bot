@@ -3,7 +3,7 @@ import aiohttp
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from bot.main import get_bot_by_id, get_all_bots, BOT_ID_TO_TOKEN, BOT_INSTANCES, dp
-from bot.config import get_all_bot_tokens, APP_URL
+from bot.config import get_all_bot_tokens, APP_URL, GROQ_API_KEY, GEMINI_API_KEY
 from handlers import start, converter, ai_chat, games, font_handler
 from games.snake_html import SNAKE_HTML
 from games.game2048_html import GAME2048_HTML
@@ -135,3 +135,72 @@ async def set_score(request: Request):
     except Exception as e:
         logger.error(f"Error handling score submit: {e}")
         return {"status": "error"}
+
+
+@app.get("/api/test-ai")
+async def test_ai():
+    """AI API kalitlarini test qilish — brauzerda oching va xato sababini ko'ring."""
+    from utils.token_rotator import groq_rotator, gemini_rotator
+
+    results = {
+        "env_vars": {
+            "GROQ_API_KEY_set": bool(GROQ_API_KEY),
+            "GROQ_API_KEY_prefix": GROQ_API_KEY[:12] + "..." if GROQ_API_KEY else "NOT SET",
+            "GEMINI_API_KEY_set": bool(GEMINI_API_KEY),
+            "GEMINI_API_KEY_prefix": GEMINI_API_KEY[:12] + "..." if GEMINI_API_KEY else "NOT SET",
+        },
+        "rotators": {
+            "groq_keys_count": len(groq_rotator.keys),
+            "groq_keys_prefixes": [k[:12] + "..." for k in groq_rotator.keys] if groq_rotator.keys else [],
+            "gemini_keys_count": len(gemini_rotator.keys),
+            "gemini_keys_prefixes": [k[:12] + "..." for k in gemini_rotator.keys] if gemini_rotator.keys else [],
+        },
+        "groq_test": None,
+        "gemini_test": None
+    }
+
+    # Test Groq
+    if groq_rotator.keys:
+        key = groq_rotator.get_key()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    json={
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [{"role": "user", "content": "Say hi"}],
+                        "max_tokens": 5
+                    },
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "Content-Type": "application/json"
+                    },
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    body = await resp.text()
+                    results["groq_test"] = {
+                        "status_code": resp.status,
+                        "response": body[:500]
+                    }
+        except Exception as e:
+            results["groq_test"] = {"error": str(e)}
+
+    # Test Gemini
+    if gemini_rotator.keys:
+        key = gemini_rotator.get_key()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}",
+                    json={"contents": [{"parts": [{"text": "Say hi"}]}]},
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    body = await resp.text()
+                    results["gemini_test"] = {
+                        "status_code": resp.status,
+                        "response": body[:500]
+                    }
+        except Exception as e:
+            results["gemini_test"] = {"error": str(e)}
+
+    return results

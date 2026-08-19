@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import logging
 import hashlib
@@ -18,6 +19,7 @@ from utils.link_downloader import (
 from utils.file_helper import cleanup
 from utils.token_rotator import groq_rotator, gemini_rotator
 from utils.chat_memory import get_user_history, add_chat_turn, clear_user_history
+from utils.font_engine import BUILTIN_FONTS, apply_font
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -337,20 +339,69 @@ async def inline_ai(query: InlineQuery):
     user_id = query.from_user.id
     bot_token_id = query.bot.token[:10] if query.bot and query.bot.token else "bot"
 
-    # 1. EMPTY QUERY -> Return prompt hint
+    # 1. EMPTY QUERY -> Return prompt hints
     if not query_text:
         results = [
             InlineQueryResultArticle(
-                id="inline_help",
-                title="💡 AI'ga savol yozing yoki video link yuboring",
-                description="Masalan: @botusername Python nima? yoki Instagram/YouTube linki",
+                id="inline_help_ai",
+                title="🤖 AI Suhbat & Savol-Javob",
+                description="Masalan: @botusername Python dasturlash tili nima?",
                 input_message_content=InputTextMessageContent(
-                    message_text="🤖 <b>@javobchiAIbot</b> orqali AI'ga savol berishingiz yoki video yuklab olishingiz mumkin.",
+                    message_text="🤖 <b>@javobchiAIbot</b> orqali AI'ga savol berishingiz, video yuklab olishingiz yoki chiroyli shriftlar ishlatishingiz mumkin.",
+                    parse_mode="HTML"
+                )
+            ),
+            InlineQueryResultArticle(
+                id="inline_help_font",
+                title="🔤 Chiroyli Fontlar (/font)",
+                description="Masalan: @botusername /font Salom Dunyo",
+                input_message_content=InputTextMessageContent(
+                    message_text="💡 <b>Chiroyli shriftda yozish uchun:</b>\n\n<code>@javobchiAIbot /font Matningiz</code>",
                     parse_mode="HTML"
                 )
             )
         ]
         await query.answer(results, cache_time=300, is_personal=True)
+        return
+
+    # 2. FONT STYLIZER INLINE MODE (e.g. @bot /font Salom or @bot font Salom)
+    if re.match(r'^[/.!]?font\b', query_text, flags=re.IGNORECASE):
+        font_text = re.sub(r'^[/.!]?font\s*', '', query_text, flags=re.IGNORECASE).strip()
+        if not font_text:
+            sample = "Salom Dunyo 123"
+            results = []
+            for name in BUILTIN_FONTS.keys():
+                sample_formatted = apply_font(name, sample)
+                results.append(
+                    InlineQueryResultArticle(
+                        id=f"font_hint_{name}",
+                        title=f"✨ {name}",
+                        description=f"Namuna: {sample_formatted} (matn yozing)",
+                        input_message_content=InputTextMessageContent(
+                            message_text=f"💡 Foydalanish: <code>@javobchiAIbot /font Matningiz</code>",
+                            parse_mode="HTML"
+                        )
+                    )
+                )
+            await query.answer(results, cache_time=300, is_personal=True)
+            return
+
+        # User provided text -> Generate stylized version for all 12 fonts
+        results = []
+        for name in BUILTIN_FONTS.keys():
+            formatted = apply_font(name, font_text)
+            results.append(
+                InlineQueryResultArticle(
+                    id=f"font_{name}_{hashlib.md5(font_text.encode()).hexdigest()[:10]}",
+                    title=f"✨ {name}",
+                    description=formatted,
+                    input_message_content=InputTextMessageContent(
+                        message_text=formatted  # ONLY sends user's stylized text
+                    )
+                )
+            )
+        await query.answer(results, cache_time=300, is_personal=True)
+        await log_activity(user_id, "inline_font", font_text[:50], "success", bot_username=bot_token_id)
         return
 
     if len(query_text) < 3:
@@ -359,7 +410,7 @@ async def inline_ai(query: InlineQuery):
     url = extract_url(query_text)
     result_id = hashlib.md5(query_text.encode()).hexdigest()
 
-    # 2. QUERY CONTAINS VIDEO URL -> Return playable inline video!
+    # 3. QUERY CONTAINS VIDEO URL -> Return playable inline video!
     if url and is_video_url(url):
         info = await extract_video_info(url)
         if info and info.get("url"):
@@ -382,7 +433,7 @@ async def inline_ai(query: InlineQuery):
             await log_activity(user_id, "inline_video_query", url, "success", bot_username=bot_token_id)
             return
 
-    # 3. QUERY IS TEXT -> Return AI answer article
+    # 4. QUERY IS TEXT -> Return AI answer article
     # Check fast cache first to avoid firing API on every single keystroke
     cached_resp = _get_cached_inline(query_text)
     if cached_resp:

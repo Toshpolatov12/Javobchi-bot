@@ -28,8 +28,9 @@ Telegram bot — Universal fayl konvertatsiya, aqlli AI suhbat, video yuklab oli
 - Inline rejimda ham ishlaydi (`@botusername link`)
 
 ### 🔤 Unicode Font Stilizatsiyasi
-- `/font Bold Salom` — 12 xil chiroyli Unicode font uslubi
-- Bold, Script, Gothic, Bubble, Double, Monospace, Small Caps, Fraktur, Outline, Squared, Circled
+- **Bot ichida:** `/font Bold Salom` — 12 xil chiroyli Unicode font uslubi
+- **Inline rejimda:** Istalgan chatda `@botusername /font Matningiz` deb yozsangiz, barcha 12 xil shriftda ko'rsatadi va tanlaganingizni sof matn sifatida yuboradi
+- Uslublar: Bold, Script, Gothic, Bubble, Double, Monospace, Small Caps, Fraktur, Outline, Squared, Circled, Sans
 
 ### 🌐 3 Tilli Qo'llab-Quvvatlash
 - 🇺🇿 O'zbekcha, 🇷🇺 Русский, 🇬🇧 English

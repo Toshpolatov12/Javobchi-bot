@@ -1,6 +1,6 @@
 # 🤖 Javobchi AI & Universal Converter Bot
 
-Telegram bot — Universal fayl konvertatsiya, AI suhbat, video yuklab olish, inline o'yinlar va ko'p-botli (Multi-Bot) rejim. Python + Aiogram 3, Vercel serverless deployment.
+Telegram bot — Universal fayl konvertatsiya, aqlli AI suhbat, video yuklab olish va ko'p-botli (Multi-Bot) rejim. Python + Aiogram 3, Vercel serverless deployment.
 
 ## ✨ Barcha Funksiyalar
 
@@ -16,7 +16,7 @@ Telegram bot — Universal fayl konvertatsiya, AI suhbat, video yuklab olish, in
 | 📚 E-Kitoblar | EPUB → TXT, PDF |
 
 ### 🤖 AI Suhbat va Web Tahlil
-- **Kontekstli Suhbat (Multi-Turn Chat)** — AI avvalgi savol va javoblaringizni eslab qoladi va haqiqiy ChatGPT/Claude kabi suhbat olib boradi
+- **Kontekstli Suhbat (Multi-Turn Chat)** — AI avvalgi savol va javoblaringizni eslab qoladi va suhbat olib boradi
 - **`/clear` / `/newchat`** — Suhbat xotirasini tozalab, yangi mavzu boshlash buyrug'i
 - **Groq (GPT-OSS 120B / Qwen / Compound)** va **Gemini** orqali o'ta tezkor AI javoblar
 - **Multi-API Key Rotator** — 429 rate limit bo'lganda avtomatik zaxira kalitga o'tadi
@@ -26,11 +26,6 @@ Telegram bot — Universal fayl konvertatsiya, AI suhbat, video yuklab olish, in
 ### 🎬 Video Yuklab Olish
 - **YouTube, Instagram Reels, TikTok, Twitter/X, Facebook** havolasidan video yuklab olish
 - Inline rejimda ham ishlaydi (`@botusername link`)
-
-### 🎮 Inline O'yinlar (Telegram Games Platform)
-- **🐍 Snake Game** — Klassik ilon o'yini, mobil touch/swipe boshqaruv
-- **🎮 2048 Game** — Raqam birlashtiruvchi boshqoturv, mobil moslashtirilgan
-- Istalgan chatda `@botusername` deb yozib o'ynash mumkin
 
 ### 🔤 Unicode Font Stilizatsiyasi
 - `/font Bold Salom` — 12 xil chiroyli Unicode font uslubi
@@ -82,9 +77,6 @@ SUPABASE_KEY=your_service_role_key
 # Admin
 ADMIN_ID=your_telegram_user_id
 
-# O'yinlar
-SNAKE_GAME_SHORT_NAME=snake_game_bot
-GAME2048_SHORT_NAME=game2048_bot
 APP_URL=https://your-app.vercel.app
 ```
 
@@ -112,7 +104,7 @@ Bu sahifa **barcha botlaringiz** uchun alohida webhook URL'larni avtomatik o'rna
 ## 📂 Loyiha Strukturasi
 
 ```
-├── api/index.py               # FastAPI webhook + game routes + setup-webhooks
+├── api/index.py               # FastAPI webhook + setup-webhooks
 ├── bot/
 │   ├── config.py              # Environment config, Multi-Bot token parser
 │   ├── database.py            # Supabase REST client + FIFO pruner
@@ -121,8 +113,7 @@ Bu sahifa **barcha botlaringiz** uchun alohida webhook URL'larni avtomatik o'rna
 ├── handlers/
 │   ├── start.py               # /start, /help, /stats, menu
 │   ├── converter.py           # File conversion (55+ formats)
-│   ├── ai_chat.py             # AI chat + inline video + inline games
-│   ├── games.py               # Game callback (Play button)
+│   ├── ai_chat.py             # AI chat + inline video + web summary
 │   └── font_handler.py        # /font Unicode stilizatsiya
 ├── converters/
 │   ├── registry.py            # Auto-detect & routing
@@ -133,9 +124,6 @@ Bu sahifa **barcha botlaringiz** uchun alohida webhook URL'larni avtomatik o'rna
 │   ├── archives.py            # ZIP/7Z/TAR
 │   ├── ebooks.py              # EPUB
 │   └── video_converter.py     # Video → GIF/Audio
-├── games/
-│   ├── snake_html.py          # HTML5 Snake o'yini
-│   └── game2048_html.py       # HTML5 2048 o'yini
 ├── keyboards/
 │   ├── main_menu.py           # Reply keyboard
 │   └── converter_kb.py        # Inline format buttons
@@ -143,6 +131,7 @@ Bu sahifa **barcha botlaringiz** uchun alohida webhook URL'larni avtomatik o'rna
 │   ├── file_helper.py         # Download/cleanup helpers
 │   ├── link_downloader.py     # yt-dlp video download + web scraper
 │   ├── token_rotator.py       # Multi-API key 429 rotation
+│   ├── chat_memory.py         # Conversational chat memory
 │   └── font_engine.py         # 12 Unicode font mappings
 ├── supabase_schema.sql        # Database schema
 ├── requirements.txt
@@ -158,7 +147,7 @@ Bu sahifa **barcha botlaringiz** uchun alohida webhook URL'larni avtomatik o'rna
 | `/clear` | AI suhbat xotirasi (kontekst)ni tozalash |
 | `/font` | Unicode font stilizatsiyasi |
 | `/stats` | Admin statistikasi (faqat ADMIN_ID) |
-| `@botusername` | Inline: o'yinlar (bo'sh), AI javob (matn), video (link) |
+| `@botusername` | Inline: AI javob (matn), video (link) |
 
 ## ⚙️ Texnologiyalar
 

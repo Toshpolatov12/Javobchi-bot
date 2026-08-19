@@ -7,10 +7,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import (
     Message, InlineQuery, InlineQueryResultArticle, InlineQueryResultVideo,
-    InlineQueryResultGame, InputTextMessageContent, FSInputFile
-)
-from bot.config import (
-    SNAKE_GAME_SHORT_NAME, GAME2048_SHORT_NAME
+    InputTextMessageContent, FSInputFile
 )
 from bot.database import get_user_lang, log_activity
 from bot.locales import MESSAGES
@@ -72,9 +69,9 @@ AI_SYSTEM_PROMPT = (
     "1. HECH QACHON o'zingizni 'ChatGPT', 'OpenAI', 'Google' yoki boshqa begona kompaniya modeli deb tanishtirmang!\n"
     "2. Agar foydalanuvchi salomlashsa, 'sen kimsan?', 'kim bu?', 'nima qila olasan?' yoki o'zingiz haqingizda so'ralsa, "
     "doimo o'zingizni '@javobchiAIbot ning shaxsiy sun'iy intellekt yordamchisi' deb tanishtiring va botning asosiy imkoniyatlarini qisqa (2-3 qatorda) ta'kidlang:\n"
-    "   • 📁 50+ formatdagi fayllarni o'zgartirish (rasm, hujjat, jadval, video, audio)\n"
+    "   • 📁 50+ formatdagi fayllarni konvertatsiya qilish (rasm, hujjat, jadval, video, audio)\n"
     "   • 🎬 Instagram, YouTube, TikTok dan videolarni yuklab berish\n"
-    "   • 💬 Aqlli AI suhbat va inline o'yinlar (Snake, 2048)\n"
+    "   • 💬 Aqlli AI suhbat va barcha savollarga tezkor javoblar\n"
     "3. Boshqa barcha savollarga aniq, ravon, samimiy, xushmuomala va suhbat tarixini inobatga olgan holda javob bering."
 )
 
@@ -197,7 +194,6 @@ async def get_ai_response(messages: list[dict] | str) -> str:
     """Gets AI response with automatic fallback across Groq and Gemini."""
     if not groq_rotator.is_empty():
         resp = await get_groq_response(messages)
-        # If Groq fails with rate limit or error, fallback to Gemini
         if (resp.startswith("❌") or resp.startswith("⚠️")) and not gemini_rotator.is_empty():
             logger.info("Groq unavailable, falling back to Gemini...")
             gemini_resp = await get_gemini_response(messages)
@@ -341,19 +337,20 @@ async def inline_ai(query: InlineQuery):
     user_id = query.from_user.id
     bot_token_id = query.bot.token[:10] if query.bot and query.bot.token else "bot"
 
-    # 1. EMPTY QUERY -> Return Games (Snake and 2048)
+    # 1. EMPTY QUERY -> Return prompt hint
     if not query_text:
-        games = [
-            InlineQueryResultGame(
-                id="game_snake",
-                game_short_name=SNAKE_GAME_SHORT_NAME
-            ),
-            InlineQueryResultGame(
-                id="game_2048",
-                game_short_name=GAME2048_SHORT_NAME
+        results = [
+            InlineQueryResultArticle(
+                id="inline_help",
+                title="💡 AI'ga savol yozing yoki video link yuboring",
+                description="Masalan: @botusername Python nima? yoki Instagram/YouTube linki",
+                input_message_content=InputTextMessageContent(
+                    message_text="🤖 <b>@javobchiAIbot</b> orqali AI'ga savol berishingiz yoki video yuklab olishingiz mumkin.",
+                    parse_mode="HTML"
+                )
             )
         ]
-        await query.answer(games, cache_time=300, is_personal=True)
+        await query.answer(results, cache_time=300, is_personal=True)
         return
 
     if len(query_text) < 3:
@@ -411,5 +408,4 @@ async def inline_ai(query: InlineQuery):
             )
         )
     ]
-    # Set cache_time=60 so Telegram client caches response for 60s instead of re-querying every keystroke
     await query.answer(results, cache_time=60, is_personal=True)

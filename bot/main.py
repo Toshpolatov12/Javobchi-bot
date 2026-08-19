@@ -37,12 +37,21 @@ def get_bot_instance(token: str = None) -> Bot:
     return BOT_INSTANCES[target_token]
 
 
-def get_bot_by_id(bot_id: str) -> Bot | None:
-    """Returns Bot instance by numeric bot_id (e.g. '896218801')."""
+def get_bot_by_id(bot_id: str = None) -> Bot | None:
+    """Returns Bot instance by numeric bot_id or fallback to default."""
+    if not bot_id:
+        return get_bot_instance()
+
     token = BOT_ID_TO_TOKEN.get(bot_id)
-    if token:
-        return BOT_INSTANCES.get(token)
-    return None
+    if token and token in BOT_INSTANCES:
+        return BOT_INSTANCES[token]
+
+    # Search through all configured tokens
+    for t in get_all_bot_tokens():
+        if _extract_bot_id(t) == bot_id:
+            return get_bot_instance(t)
+
+    return get_bot_instance()
 
 
 def get_all_bots() -> list[Bot]:
@@ -65,4 +74,7 @@ for _token in get_all_bot_tokens():
         logger.error(f"Startup: Failed to init bot {_token[:10]}...: {_e}")
 
 # Default bot instance for backward compatibility
-bot = BOT_INSTANCES.get(get_all_bot_tokens()[0]) if get_all_bot_tokens() else Bot(token=BOT_TOKEN)
+try:
+    bot = get_bot_instance()
+except Exception:
+    bot = None

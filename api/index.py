@@ -1,7 +1,7 @@
 import logging
 import aiohttp
 from fastapi import FastAPI, Request
-from bot.main import get_bot_by_id, get_all_bots, BOT_ID_TO_TOKEN, BOT_INSTANCES, dp
+from bot.main import get_bot_by_id, get_bot_instance, get_all_bots, BOT_ID_TO_TOKEN, BOT_INSTANCES, dp
 from bot.config import get_all_bot_tokens, APP_URL, GROQ_API_KEY, GEMINI_API_KEY
 from handlers import start, converter, ai_chat, font_handler
 
@@ -18,10 +18,11 @@ app = FastAPI()
 
 
 @app.post("/api/webhook/{bot_id}")
-async def webhook(request: Request, bot_id: str):
+@app.post("/api/webhook")
+async def webhook(request: Request, bot_id: str = None):
     """
-    Har bir bot o'z webhook URL'iga ega:
-    /api/webhook/896218801  (faqat raqamli bot ID, ':' belgisi yo'q)
+    Handles incoming Telegram webhook updates for multi-bot and single-bot modes.
+    URL: /api/webhook/896218801 or fallback /api/webhook
     """
     try:
         data = await request.json()
@@ -35,8 +36,12 @@ async def webhook(request: Request, bot_id: str):
     return {"ok": True}
 
 
+@app.get("/api/webhook/{bot_id}")
 @app.get("/api/webhook")
-async def health():
+@app.get("/api/ping")
+@app.get("/ping")
+async def health(bot_id: str = None):
+    """Health check / auto-ping endpoint to prevent server sleep."""
     return {
         "status": "running",
         "bot": "File Converter & AI Multi-Bot Server",

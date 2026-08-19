@@ -35,14 +35,37 @@ CREATE TABLE IF NOT EXISTS chat_history (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. Indekslar (tezlik uchun)
+-- 4. Admins jadvali (Multi-Admin tizimi)
+CREATE TABLE IF NOT EXISTS admins (
+    id BIGINT PRIMARY KEY,           -- Telegram user_id
+    username TEXT DEFAULT '',         -- @username
+    role TEXT DEFAULT 'admin',        -- 'superadmin' yoki 'admin'
+    added_by BIGINT DEFAULT 0,        -- Kim tomonidan qo'shilgan
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. Banned Users jadvali
+CREATE TABLE IF NOT EXISTS banned_users (
+    id BIGINT PRIMARY KEY,           -- Telegram user_id
+    reason TEXT DEFAULT '',           -- Bloklanish sababi
+    banned_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. Bot Sozlamalari jadvali (Maintenance / Texnik tanaffus)
+CREATE TABLE IF NOT EXISTS bot_settings (
+    key TEXT PRIMARY KEY,             -- Sozlama nomi (masalan 'maintenance')
+    value TEXT NOT NULL,              -- 'true' yoki 'false'
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. Indekslar (tezlik uchun)
 CREATE INDEX IF NOT EXISTS idx_activities_user_id ON activities(user_id);
 CREATE INDEX IF NOT EXISTS idx_activities_created_at ON activities(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chat_history_user_id ON chat_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_chat_history_created_at ON chat_history(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC);
 
--- 5. Updated_at avtomatik yangilash
+-- 8. Updated_at avtomatik yangilash
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -56,23 +79,18 @@ CREATE TRIGGER users_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();
 
--- 6. RLS (Row Level Security) — API key bilan ishlash uchun
+-- 9. RLS (Row Level Security)
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chat_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE banned_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bot_settings ENABLE ROW LEVEL SECURITY;
 
 -- Service role uchun to'liq ruxsat (bot orqali)
-CREATE POLICY "Service role full access on users"
-    ON users FOR ALL
-    USING (true)
-    WITH CHECK (true);
-
-CREATE POLICY "Service role full access on activities"
-    ON activities FOR ALL
-    USING (true)
-    WITH CHECK (true);
-
-CREATE POLICY "Service role full access on chat_history"
-    ON chat_history FOR ALL
-    USING (true)
-    WITH CHECK (true);
+CREATE POLICY "Service role full access on users" ON users FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access on activities" ON activities FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access on chat_history" ON chat_history FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access on admins" ON admins FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access on banned_users" ON banned_users FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access on bot_settings" ON bot_settings FOR ALL USING (true) WITH CHECK (true);

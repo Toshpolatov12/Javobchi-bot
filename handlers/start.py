@@ -4,7 +4,8 @@ from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 from bot.database import (
     save_user, get_user_lang, get_user_lang_raw,
-    get_all_users_count, get_recent_activities
+    get_all_users_count, get_recent_activities,
+    is_admin, is_maintenance_mode, is_user_banned
 )
 from bot.locales import MESSAGES
 from keyboards.main_menu import get_main_menu, get_file_transfer_menu, get_language_keyboard
@@ -17,6 +18,21 @@ router = Router()
 @router.message(Command("start"))
 async def start_handler(message: Message):
     user_id = message.from_user.id
+
+    # 1. Ban check
+    if await is_user_banned(user_id):
+        await message.answer("🚫 <b>Siz ushbu botdan bloklangansiz.</b>", parse_mode="HTML")
+        return
+
+    # 2. Maintenance check
+    if await is_maintenance_mode() and not await is_admin(user_id):
+        await message.answer(
+            "🛠 <b>Botda texnik profilaktika ishlari olib borilmoqda.</b>\n\n"
+            "Tez orada qaytamiz! Keltirilgan noqulaylik uchun uzr so'raymiz.",
+            parse_mode="HTML"
+        )
+        return
+
     saved_lang = await get_user_lang_raw(user_id)
 
     if saved_lang is None:

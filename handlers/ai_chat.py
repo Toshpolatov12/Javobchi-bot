@@ -10,7 +10,10 @@ from aiogram.types import (
     Message, InlineQuery, InlineQueryResultArticle, InlineQueryResultVideo,
     InputTextMessageContent, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 )
-from bot.database import get_user_lang, log_activity
+from bot.database import (
+    get_user_lang, log_activity,
+    is_admin, is_maintenance_mode, is_user_banned
+)
 from bot.locales import MESSAGES
 from utils.link_downloader import (
     extract_url, is_video_url, extract_video_info,
@@ -251,7 +254,15 @@ async def chat_handler(message: Message):
     if message.text in menu_texts:
         return
 
-    lang = await get_user_lang(message.from_user.id)
+    user_id = message.from_user.id
+    if await is_user_banned(user_id):
+        return
+
+    if await is_maintenance_mode() and not await is_admin(user_id):
+        await message.answer("🛠 <b>Botda texnik profilaktika ketmoqda.</b> Tez orada qaytamiz!", parse_mode="HTML")
+        return
+
+    lang = await get_user_lang(user_id)
     user_id = message.from_user.id
     bot_token_id = message.bot.token[:10] if message.bot and message.bot.token else "bot"
     url = extract_url(message.text)

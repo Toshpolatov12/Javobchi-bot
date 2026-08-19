@@ -145,10 +145,11 @@ Bu sahifa **barcha botlaringiz** uchun alohida webhook URL'larni avtomatik o'rna
 |---|---|
 | `/start` | Botni ishga tushirish, tilni aniqlash |
 | `/help` | Barcha formatlar ro'yxati |
+| `/admin` | 👑 Admin panel: xabar tarqatish, botni to'xtatish/uyg'otish, adminlar, ban |
 | `/clear` | AI suhbat xotirasi (kontekst)ni tozalash |
 | `/font` | Unicode font stilizatsiyasi |
-| `/stats` | Admin statistikasi (faqat ADMIN_ID) |
-| `@botusername` | Inline: AI javob (matn), video (link) |
+| `/stats` | Admin statistikasi |
+| `@botusername` | Inline: AI javob (matn), video (link), /font shriftlar |
 
 ## ⚙️ Texnologiyalar
 

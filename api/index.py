@@ -3,12 +3,13 @@ import aiohttp
 from fastapi import FastAPI, Request
 from bot.main import get_bot_by_id, get_bot_instance, get_all_bots, BOT_ID_TO_TOKEN, BOT_INSTANCES, dp
 from bot.config import get_all_bot_tokens, APP_URL, GROQ_API_KEY, GEMINI_API_KEY
-from handlers import start, converter, ai_chat, font_handler
+from handlers import start, converter, ai_chat, font_handler, admin
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 # Register routers — ORDER MATTERS!
+dp.include_router(admin.router)
 dp.include_router(start.router)
 dp.include_router(converter.router)
 dp.include_router(font_handler.router)
